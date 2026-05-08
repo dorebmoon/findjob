@@ -1,0 +1,1929 @@
+{% extends "base.html" %}
+{% block title %}控制面板{% endblock %}
+
+{% block extra_style %}
+<style>
+    /* Layout */
+    .app-container {
+        display: flex;
+        min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+        width: 260px;
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 100;
+        transition: transform 0.3s ease;
+    }
+    .sidebar-header {
+        padding: 20px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .sidebar-header .logo-icon {
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+    .sidebar-header h2 {
+        font-size: 18px;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--text-primary), var(--accent-blue));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .sidebar-header span {
+        font-size: 11px;
+        color: var(--text-muted);
+        display: block;
+    }
+    .sidebar-nav {
+        flex: 1;
+        padding: 12px;
+        overflow-y: auto;
+    }
+    .nav-section {
+        margin-bottom: 20px;
+    }
+    .nav-section-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        letter-spacing: 0.5px;
+        padding: 8px 12px;
+    }
+    .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: var(--transition);
+        font-size: 14px;
+        font-weight: 500;
+        position: relative;
+    }
+    .nav-item:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+    .nav-item.active {
+        background: rgba(79, 140, 255, 0.12);
+        color: var(--accent-blue);
+    }
+    .nav-item .badge {
+        position: absolute;
+        right: 10px;
+        background: var(--accent-red);
+        color: white;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 10px;
+        min-width: 18px;
+        text-align: center;
+    }
+    .nav-item .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .status-dot.online { background: var(--accent-green); }
+    .status-dot.offline { background: var(--text-muted); }
+    .status-dot.loading { background: var(--accent-orange); animation: pulse 1s infinite; }
+
+    .sidebar-footer {
+        padding: 16px 20px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .user-avatar {
+        width: 36px;
+        height: 36px;
+        background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        font-weight: 600;
+        color: white;
+    }
+    .user-info {
+        flex: 1;
+        min-width: 0;
+    }
+    .user-info .name {
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .user-info .role {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .logout-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 18px;
+        padding: 6px;
+        border-radius: 6px;
+        transition: var(--transition);
+    }
+    .logout-btn:hover {
+        background: rgba(248, 113, 113, 0.1);
+        color: var(--accent-red);
+    }
+
+    /* Main Content */
+    .main-content {
+        flex: 1;
+        margin-left: 260px;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+    }
+
+    /* Top Bar */
+    .topbar {
+        padding: 16px 28px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 50;
+    }
+    .topbar-left h1 {
+        font-size: 20px;
+        font-weight: 700;
+    }
+    .topbar-left p {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+    .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .topbar-actions .btn {
+        gap: 6px;
+    }
+
+    /* Content Panels */
+    .content-area {
+        flex: 1;
+        padding: 24px 28px;
+        overflow-y: auto;
+    }
+
+    .panel {
+        display: none;
+    }
+    .panel.active {
+        display: block;
+        animation: fadeIn 0.3s ease;
+    }
+
+    /* Platform Grid */
+    .platform-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    .platform-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 20px;
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+    .platform-card:hover {
+        border-color: rgba(79, 140, 255, 0.3);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+    }
+    .platform-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+    }
+    .platform-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+    .platform-card-header .left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .platform-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+    }
+    .platform-card-header h3 {
+        font-size: 16px;
+        font-weight: 600;
+    }
+    .platform-card-header .platform-url {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .platform-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 4px 10px;
+        border-radius: 20px;
+    }
+    .platform-status.online {
+        background: rgba(52, 211, 153, 0.12);
+        color: var(--accent-green);
+    }
+    .platform-status.offline {
+        background: rgba(107, 114, 128, 0.12);
+        color: var(--text-muted);
+    }
+    .platform-status.loading {
+        background: rgba(251, 146, 60, 0.12);
+        color: var(--accent-orange);
+    }
+    .platform-card-body {
+        margin-bottom: 14px;
+    }
+    .platform-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .platform-meta .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .platform-card-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .platform-card-actions .btn {
+        flex: 1;
+        justify-content: center;
+        min-width: 0;
+    }
+
+    /* Quick Actions Bar */
+    .quick-actions {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+    }
+    .quick-action-btn {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 20px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: var(--transition);
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    .quick-action-btn:hover {
+        border-color: var(--accent-blue);
+        background: rgba(79, 140, 255, 0.08);
+    }
+    .quick-action-btn .action-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+    }
+    .quick-action-btn.primary .action-icon {
+        background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    }
+    .quick-action-btn.success .action-icon {
+        background: linear-gradient(135deg, var(--accent-green), #10b981);
+    }
+    .quick-action-btn.warning .action-icon {
+        background: linear-gradient(135deg, var(--accent-orange), #f59e0b);
+    }
+
+    /* Stats Cards */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    .stat-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 18px;
+    }
+    .stat-card .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-weight: 500;
+        margin-bottom: 8px;
+    }
+    .stat-card .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+    }
+    .stat-card .stat-change {
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    /* Messages Panel */
+    .messages-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .messages-filters {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .filter-chip {
+        padding: 6px 14px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        cursor: pointer;
+        transition: var(--transition);
+        font-family: inherit;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .filter-chip:hover {
+        border-color: var(--accent-blue);
+        color: var(--text-primary);
+    }
+    .filter-chip.active {
+        background: rgba(79, 140, 255, 0.15);
+        border-color: var(--accent-blue);
+        color: var(--accent-blue);
+    }
+    .filter-chip .chip-count {
+        background: rgba(255,255,255,0.15);
+        padding: 0 5px;
+        border-radius: 8px;
+        font-size: 11px;
+    }
+
+    .message-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .message-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 16px 20px;
+        display: flex;
+        gap: 14px;
+        cursor: pointer;
+        transition: var(--transition);
+        animation: slideIn 0.3s ease;
+    }
+    .message-item:hover {
+        border-color: rgba(79, 140, 255, 0.3);
+        background: rgba(79, 140, 255, 0.04);
+    }
+    .message-item.unread {
+        border-left: 3px solid var(--accent-blue);
+    }
+    .message-item.unread .msg-sender {
+        font-weight: 600;
+    }
+    .msg-platform-badge {
+        width: 42px;
+        height: 42px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+    .msg-body {
+        flex: 1;
+        min-width: 0;
+    }
+    .msg-top-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+    }
+    .msg-sender {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+    .msg-sender .company {
+        color: var(--text-muted);
+        font-weight: 400;
+        font-size: 12px;
+        margin-left: 6px;
+    }
+    .msg-time {
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+    .msg-job {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--accent-blue);
+        background: rgba(79, 140, 255, 0.1);
+        padding: 2px 8px;
+        border-radius: 4px;
+        margin-bottom: 6px;
+    }
+    .msg-content {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .msg-tags {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+    }
+    .msg-tag {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+    .msg-tag.salary {
+        background: rgba(52, 211, 153, 0.1);
+        color: var(--accent-green);
+    }
+    .msg-tag.type-invite {
+        background: rgba(167, 139, 250, 0.1);
+        color: var(--accent-purple);
+    }
+    .msg-tag.type-system {
+        background: rgba(251, 146, 60, 0.1);
+        color: var(--accent-orange);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+    }
+    .empty-state .empty-icon {
+        font-size: 64px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+    }
+    .empty-state h3 {
+        font-size: 18px;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+    }
+    .empty-state p {
+        font-size: 14px;
+        max-width: 400px;
+        margin: 0 auto;
+    }
+
+    /* SMS Modal */
+    .sms-modal-content {
+        text-align: center;
+    }
+    .sms-modal-content .sms-steps {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 20px;
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+    .sms-modal-content .sms-step {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .sms-modal-content .sms-step.active {
+        color: var(--accent-blue);
+        font-weight: 600;
+    }
+    .sms-modal-content .sms-step .step-num {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--bg-tertiary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+    }
+    .sms-modal-content .sms-step.active .step-num {
+        background: var(--accent-blue);
+        color: white;
+    }
+    .sms-modal-content .sms-phone-input {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .sms-modal-content .sms-phone-input .form-input {
+        flex: 1;
+    }
+    .sms-modal-content .sms-code-input {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .sms-modal-content .sms-code-input .form-input {
+        flex: 1;
+        text-align: center;
+        font-size: 24px;
+        letter-spacing: 8px;
+        font-weight: 600;
+    }
+    .sms-modal-content .sms-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        font-size: 14px;
+        margin-top: 16px;
+        padding: 10px;
+        border-radius: var(--radius-sm);
+    }
+    .sms-modal-content .sms-status.success {
+        background: rgba(52, 211, 153, 0.1);
+        color: var(--accent-green);
+    }
+    .sms-modal-content .sms-status.error {
+        background: rgba(248, 113, 113, 0.1);
+        color: var(--accent-red);
+    }
+    .sms-modal-content .sms-status.waiting {
+        background: rgba(251, 146, 60, 0.1);
+        color: var(--accent-orange);
+    }
+    .sms-countdown {
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    /* Theme Selector */
+    .theme-panel {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 200;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        width: 260px;
+        box-shadow: var(--shadow-lg);
+        display: none;
+    }
+    .theme-panel.active {
+        display: block;
+        animation: fadeIn 0.3s ease;
+    }
+    .theme-panel h4 {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .theme-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }
+    .theme-option {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        padding: 10px 6px;
+        border-radius: var(--radius-sm);
+        border: 2px solid transparent;
+        transition: var(--transition);
+        background: none;
+        font-family: inherit;
+        color: var(--text-secondary);
+    }
+    .theme-option:hover {
+        background: var(--bg-tertiary);
+    }
+    .theme-option.active {
+        border-color: var(--accent-blue);
+        background: rgba(79, 140, 255, 0.08);
+        color: var(--text-primary);
+    }
+    .theme-option .theme-preview {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        position: relative;
+        overflow: hidden;
+    }
+    .theme-option .theme-preview .tp-bg {
+        position: absolute;
+        inset: 0;
+    }
+    .theme-option .theme-preview .tp-accent {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+    }
+    .theme-option .theme-name {
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    /* Light Theme */
+    [data-theme="light"] {
+        --bg-primary: #f5f6fa;
+        --bg-secondary: #ffffff;
+        --bg-tertiary: #eef0f5;
+        --bg-card: #ffffff;
+        --text-primary: #1a1d27;
+        --text-secondary: #555b6e;
+        --text-muted: #8b92a5;
+        --border-color: #dde0e9;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+        --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+        --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+    }
+    [data-theme="light"] .status-dot.online { background: #059669; }
+    [data-theme="light"] .status-dot.offline { background: #9ca3af; }
+    [data-theme="light"] .auth-container {
+        background: linear-gradient(135deg, #f5f6fa 0%, #e8eaf0 50%, #f5f6fa 100%);
+    }
+    [data-theme="light"] .auth-container::before {
+        background: radial-gradient(circle at 30% 50%, rgba(79, 140, 255, 0.06) 0%, transparent 50%),
+                    radial-gradient(circle at 70% 50%, rgba(167, 139, 250, 0.04) 0%, transparent 50%);
+    }
+    [data-theme="light"] .auth-card {
+        background: rgba(255, 255, 255, 0.95);
+    }
+
+    /* Ocean Theme */
+    [data-theme="ocean"] {
+        --bg-primary: #0a192f;
+        --bg-secondary: #112240;
+        --bg-tertiary: #1a3050;
+        --bg-card: #152642;
+        --text-primary: #ccd6f6;
+        --text-secondary: #8892b0;
+        --text-muted: #5a6785;
+        --border-color: #1e3a5f;
+        --accent-blue: #64ffda;
+        --accent-green: #64ffda;
+        --accent-orange: #ffa726;
+        --accent-red: #ef5350;
+        --accent-purple: #7c4dff;
+    }
+    [data-theme="ocean"] .btn-primary { background: #64ffda; color: #0a192f; }
+    [data-theme="ocean"] .btn-primary:hover:not(:disabled) { background: #4dd0bd; }
+    [data-theme="ocean"] .btn-ghost { border-color: #1e3a5f; }
+    [data-theme="ocean"] .btn-ghost:hover { background: #1a3050; }
+    [data-theme="ocean"] .filter-chip.active {
+        background: rgba(100, 255, 218, 0.1);
+        border-color: #64ffda;
+        color: #64ffda;
+    }
+    [data-theme="ocean"] .nav-item.active {
+        background: rgba(100, 255, 218, 0.1);
+        color: #64ffda;
+    }
+    [data-theme="ocean"] .toast-success { background: #0d3b32; color: #64ffda; border-color: #1a6b5a; }
+    [data-theme="ocean"] .auth-container {
+        background: linear-gradient(135deg, #0a192f 0%, #112240 50%, #0a192f 100%);
+    }
+    [data-theme="ocean"] .auth-card { background: rgba(17, 34, 64, 0.95); }
+
+    /* Purple Theme */
+    [data-theme="purple"] {
+        --bg-primary: #120d1f;
+        --bg-secondary: #1c1535;
+        --bg-tertiary: #261e42;
+        --bg-card: #211a38;
+        --text-primary: #e4dff5;
+        --text-secondary: #a99cc8;
+        --text-muted: #6b5c8a;
+        --border-color: #2e2550;
+        --accent-blue: #b388ff;
+        --accent-green: #69f0ae;
+        --accent-orange: #ffab40;
+        --accent-red: #ff5252;
+        --accent-purple: #b388ff;
+    }
+    [data-theme="purple"] .btn-primary { background: #b388ff; color: #120d1f; }
+    [data-theme="purple"] .btn-primary:hover:not(:disabled) { background: #9c6eff; }
+    [data-theme="purple"] .btn-ghost { border-color: #2e2550; }
+    [data-theme="purple"] .btn-ghost:hover { background: #261e42; }
+    [data-theme="purple"] .filter-chip.active {
+        background: rgba(179, 136, 255, 0.12);
+        border-color: #b388ff;
+        color: #b388ff;
+    }
+    [data-theme="purple"] .nav-item.active {
+        background: rgba(179, 136, 255, 0.12);
+        color: #b388ff;
+    }
+    [data-theme="purple"] .sidebar-header h2 {
+        background: linear-gradient(135deg, #e4dff5, #b388ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    [data-theme="purple"] .auth-container {
+        background: linear-gradient(135deg, #120d1f 0%, #1c1535 50%, #120d1f 100%);
+    }
+    [data-theme="purple"] .auth-card { background: rgba(28, 21, 53, 0.95); }
+
+    /* Green Theme */
+    [data-theme="green"] {
+        --bg-primary: #0c1a0f;
+        --bg-secondary: #122013;
+        --bg-tertiary: #1a2d1c;
+        --bg-card: #162817;
+        --text-primary: #d8ecd9;
+        --text-secondary: #8fb893;
+        --text-muted: #5c8a5f;
+        --border-color: #243a25;
+        --accent-blue: #69f0ae;
+        --accent-green: #69f0ae;
+        --accent-orange: #ffcc02;
+        --accent-red: #ff6e40;
+        --accent-purple: #b388ff;
+    }
+    [data-theme="green"] .btn-primary { background: #69f0ae; color: #0c1a0f; }
+    [data-theme="green"] .btn-primary:hover:not(:disabled) { background: #4cd99b; }
+    [data-theme="green"] .btn-ghost { border-color: #243a25; }
+    [data-theme="green"] .btn-ghost:hover { background: #1a2d1c; }
+    [data-theme="green"] .filter-chip.active {
+        background: rgba(105, 240, 174, 0.1);
+        border-color: #69f0ae;
+        color: #69f0ae;
+    }
+    [data-theme="green"] .nav-item.active {
+        background: rgba(105, 240, 174, 0.1);
+        color: #69f0ae;
+    }
+    [data-theme="green"] .auth-container {
+        background: linear-gradient(135deg, #0c1a0f 0%, #122013 50%, #0c1a0f 100%);
+    }
+    [data-theme="green"] .auth-card { background: rgba(18, 32, 19, 0.95); }
+
+    /* Warm Theme */
+    [data-theme="warm"] {
+        --bg-primary: #1a1412;
+        --bg-secondary: #241e1a;
+        --bg-tertiary: #302820;
+        --bg-card: #282019;
+        --text-primary: #f0e6d8;
+        --text-secondary: #b8a890;
+        --text-muted: #7a6e5e;
+        --border-color: #3a3028;
+        --accent-blue: #ffab40;
+        --accent-green: #aed581;
+        --accent-orange: #ffab40;
+        --accent-red: #ff8a65;
+        --accent-purple: #ce93d8;
+    }
+    [data-theme="warm"] .btn-primary { background: #ffab40; color: #1a1412; }
+    [data-theme="warm"] .btn-primary:hover:not(:disabled) { background: #ff9800; }
+    [data-theme="warm"] .btn-ghost { border-color: #3a3028; }
+    [data-theme="warm"] .btn-ghost:hover { background: #302820; }
+    [data-theme="warm"] .filter-chip.active {
+        background: rgba(255, 171, 64, 0.12);
+        border-color: #ffab40;
+        color: #ffab40;
+    }
+    [data-theme="warm"] .nav-item.active {
+        background: rgba(255, 171, 64, 0.12);
+        color: #ffab40;
+    }
+    [data-theme="warm"] .auth-container {
+        background: linear-gradient(135deg, #1a1412 0%, #241e1a 50%, #1a1412 100%);
+    }
+    [data-theme="warm"] .auth-card { background: rgba(36, 30, 26, 0.95); }
+
+    /* Loading overlay */
+    .loading-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(4px);
+        z-index: 999;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 16px;
+    }
+    .loading-overlay.active {
+        display: flex;
+    }
+    .loading-overlay .spinner-lg {
+        border-color: rgba(79, 140, 255, 0.3);
+        border-top-color: var(--accent-blue);
+    }
+    .loading-overlay p {
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+
+    /* Mobile Toggle */
+    .mobile-toggle {
+        display: none;
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        font-size: 24px;
+        cursor: pointer;
+        padding: 4px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .sidebar {
+            transform: translateX(-100%);
+        }
+        .sidebar.open {
+            transform: translateX(0);
+        }
+        .main-content {
+            margin-left: 0;
+        }
+        .mobile-toggle {
+            display: block;
+        }
+        .platform-grid {
+            grid-template-columns: 1fr;
+        }
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .content-area {
+            padding: 16px;
+        }
+        .topbar {
+            padding: 12px 16px;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+        .quick-actions {
+            flex-direction: column;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo-icon">💼</div>
+            <div>
+                <h2>FindJob</h2>
+                <span>求职信息聚合平台</span>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">概览</div>
+                <div class="nav-item active" data-panel="platforms" onclick="switchPanel('platforms')">
+                    <i class="ri-apps-2-line"></i> 平台管理
+                </div>
+                <div class="nav-item" data-panel="messages" onclick="switchPanel('messages')">
+                    <i class="ri-message-3-line"></i> 消息中心
+                    <span class="badge" id="unreadBadge" style="display:none">0</span>
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section-title">平台状态</div>
+                {% for key, platform in platforms.items() %}
+                <div class="nav-item platform-nav-item" data-platform="{{ key }}">
+                    <span class="status-dot {{ 'online' if credentials.get(key) and credentials[key].is_logged_in else 'offline' }}" id="statusDot_{{ key }}"></span>
+                    {{ platform.icon }} {{ platform.name }}
+                </div>
+                {% endfor %}
+            </div>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-avatar">{{ current_user.username[0]|upper }}</div>
+            <div class="user-info">
+                <div class="name">{{ current_user.username }}</div>
+                <div class="role">求职者</div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="logout-btn" title="退出登录">
+                <i class="ri-logout-box-r-line"></i>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Top Bar -->
+        <header class="topbar">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">
+                    <i class="ri-menu-line"></i>
+                </button>
+                <div class="topbar-left">
+                    <h1 id="pageTitle">平台管理</h1>
+                    <p id="pageSubtitle">管理您的求职平台账号，一键登录所有平台</p>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-ghost" onclick="toggleThemePanel()" title="切换主题">
+                    <i class="ri-palette-line"></i> 主题
+                </button>
+                <button class="btn btn-ghost" onclick="loadDemoData()">
+                    <i class="ri-flask-line"></i> 加载演示数据
+                </button>
+                <button class="btn btn-primary" onclick="loginAll()" id="loginAllBtn">
+                    <i class="ri-login-box-line"></i> 一键登录全部
+                </button>
+            </div>
+        </header>
+
+        <div class="content-area">
+            <!-- Platforms Panel -->
+            <div class="panel active" id="panel-platforms">
+                <!-- Quick Actions -->
+                <div class="quick-actions">
+                    <button class="quick-action-btn primary" onclick="loginAll()">
+                        <div class="action-icon">
+                            <i class="ri-rocket-2-line"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:600">一键登录全部</div>
+                            <div style="font-size:12px;color:var(--text-muted)">自动登录所有已配置的平台</div>
+                        </div>
+                    </button>
+                    <button class="quick-action-btn success" onclick="refreshMessages()">
+                        <div class="action-icon">
+                            <i class="ri-refresh-line"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:600">刷新消息</div>
+                            <div style="font-size:12px;color:var(--text-muted)">从所有平台获取最新消息</div>
+                        </div>
+                    </button>
+                    <button class="quick-action-btn warning" onclick="switchPanel('messages')">
+                        <div class="action-icon">
+                            <i class="ri-message-3-line"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:600">查看消息</div>
+                            <div style="font-size:12px;color:var(--text-muted)" id="msgCountSummary">暂无消息</div>
+                        </div>
+                    </button>
+                </div>
+
+                <!-- Platform Cards -->
+                <div class="platform-grid" id="platformGrid">
+                    {% for key, platform in platforms.items() %}
+                    <div class="platform-card" id="card_{{ key }}" style="--card-color: {{ platform.color }}">
+                        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:{{ platform.color }}"></div>
+                        <div class="platform-card-header">
+                            <div class="left">
+                                <div class="platform-icon" style="background:{{ platform.color }}22;color:{{ platform.color }}">
+                                    {{ platform.icon }}
+                                </div>
+                                <div>
+                                    <h3>{{ platform.name }}</h3>
+                                    <div class="platform-url">{{ platform.url }}</div>
+                                </div>
+                            </div>
+                            <div class="platform-status {{ 'online' if credentials.get(key) and credentials[key].is_logged_in else 'offline' }}" id="platformStatus_{{ key }}">
+                                <span class="status-dot {{ 'online' if credentials.get(key) and credentials[key].is_logged_in else 'offline' }}"></span>
+                                {{ '已连接' if credentials.get(key) and credentials[key].is_logged_in else '未连接' }}
+                            </div>
+                        </div>
+                        <div class="platform-card-body">
+                            <div class="platform-meta">
+                                <div class="meta-item">
+                                    <i class="ri-user-line"></i>
+                                    <span id="credUser_{{ key }}">{{ credentials[key].username[:3] + '***' if credentials.get(key) else '未配置' }}</span>
+                                </div>
+                                <div class="meta-item">
+                                    <i class="ri-time-line"></i>
+                                    <span id="credLastLogin_{{ key }}">{{ credentials[key].last_login.strftime('%m-%d %H:%M') if credentials.get(key) and credentials[key].last_login else '从未登录' }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="platform-card-actions">
+                            <button class="btn btn-ghost btn-sm" onclick="openCredentialModal('{{ key }}', '{{ platform.name }}', '{{ platform.icon }}')">
+                                <i class="ri-settings-3-line"></i> 配置账号
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="loginPlatform('{{ key }}', '{{ platform.name }}')" id="loginBtn_{{ key }}">
+                                <i class="ri-login-box-line"></i> 密码登录
+                            </button>
+                            <button class="btn btn-ghost btn-sm" onclick="smsLoginPlatform('{{ key }}', '{{ platform.name }}')" id="smsBtn_{{ key }}" style="color:var(--accent-green)">
+                                <i class="ri-smartphone-line"></i> 验证码
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Messages Panel -->
+            <div class="panel" id="panel-messages">
+                <!-- Stats -->
+                <div class="stats-grid" id="statsGrid">
+                    <div class="stat-card">
+                        <div class="stat-label">总消息数</div>
+                        <div class="stat-value" id="statTotal">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">未读消息</div>
+                        <div class="stat-value" id="statUnread" style="color:var(--accent-orange)">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">已连接平台</div>
+                        <div class="stat-value" id="statPlatforms" style="color:var(--accent-green)">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">今日消息</div>
+                        <div class="stat-value" id="statToday" style="color:var(--accent-blue)">0</div>
+                    </div>
+                </div>
+
+                <!-- Messages Header -->
+                <div class="messages-header">
+                    <div class="messages-filters" id="messageFilters">
+                        <button class="filter-chip active" data-filter="all" onclick="filterMessages('all')">
+                            <i class="ri-apps-line"></i> 全部
+                        </button>
+                        {% for key, platform in platforms.items() %}
+                        <button class="filter-chip" data-filter="{{ key }}" onclick="filterMessages('{{ key }}')">
+                            {{ platform.icon }} {{ platform.name }}
+                            <span class="chip-count" id="filterCount_{{ key }}">0</span>
+                        </button>
+                        {% endfor %}
+                    </div>
+                    <button class="btn btn-ghost btn-sm" onclick="refreshMessages()">
+                        <i class="ri-refresh-line"></i> 刷新
+                    </button>
+                </div>
+
+                <!-- Message List -->
+                <div class="message-list" id="messageList">
+                    <div class="empty-state">
+                        <div class="empty-icon">📭</div>
+                        <h3>暂无消息</h3>
+                        <p>请先登录求职平台账号，然后点击"刷新消息"获取最新推送信息</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Credential Modal -->
+<div class="modal-overlay" id="credentialModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modalTitle">配置账号</h3>
+            <button class="modal-close" onclick="closeCredentialModal()">
+                <i class="ri-close-line"></i>
+            </button>
+        </div>
+        <form onsubmit="saveCredential(event)">
+            <input type="hidden" id="modalPlatform" value="">
+            <div class="form-group">
+                <label id="modalUsernameLabel">手机号 / 邮箱</label>
+                <input type="text" id="modalUsername" class="form-input" placeholder="请输入手机号或邮箱" required>
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="modalPassword" class="form-input" placeholder="请输入密码" required>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:20px">
+                <button type="button" class="btn btn-ghost" onclick="closeCredentialModal()" style="flex:1;justify-content:center">取消</button>
+                <button type="submit" class="btn btn-primary" style="flex:1;justify-content:center">
+                    <i class="ri-save-line"></i> 保存
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- SMS Login Modal -->
+<div class="modal-overlay" id="smsModal">
+    <div class="modal" style="max-width:440px">
+        <div class="modal-header">
+            <h3 id="smsModalTitle">📱 手机验证码登录</h3>
+            <button class="modal-close" onclick="closeSmsModal()">
+                <i class="ri-close-line"></i>
+            </button>
+        </div>
+        <div class="sms-modal-content">
+            <div class="sms-steps">
+                <div class="sms-step active" id="smsStep1">
+                    <span class="step-num">1</span>
+                    <span>打开浏览器</span>
+                </div>
+                <i class="ri-arrow-right-s-line"></i>
+                <div class="sms-step" id="smsStep2">
+                    <span class="step-num">2</span>
+                    <span>完成验证</span>
+                </div>
+                <i class="ri-arrow-right-s-line"></i>
+                <div class="sms-step" id="smsStep3">
+                    <span class="step-num">3</span>
+                    <span>登录成功</span>
+                </div>
+            </div>
+
+            <div id="smsPhase1">
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius-md);padding:16px;margin-bottom:16px;text-align:left">
+                    <p style="font-size:14px;color:var(--text-primary);margin-bottom:8px;font-weight:600">
+                        <i class="ri-information-line" style="color:var(--accent-blue)"></i> 操作步骤
+                    </p>
+                    <ol style="font-size:13px;color:var(--text-secondary);padding-left:20px;line-height:2">
+                        <li>点击下方按钮，系统将自动打开浏览器并进入登录页面</li>
+                        <li>在浏览器中选择「验证码登录」，输入手机号</li>
+                        <li>点击发送验证码，完成滑块验证等安全校验</li>
+                        <li>输入收到的短信验证码，点击登录</li>
+                    </ol>
+                </div>
+                <button class="btn btn-primary btn-lg" onclick="startSmsLogin()" id="startSmsBtn" style="width:100%;justify-content:center;padding:14px">
+                    <i class="ri-external-link-line"></i> 打开浏览器并登录
+                </button>
+            </div>
+
+            <!-- Waiting phase -->
+            <div id="smsPhase2" style="display:none">
+                <div style="text-align:center;padding:20px 0">
+                    <div class="spinner spinner-lg" style="margin-bottom:16px"></div>
+                    <p style="font-size:15px;color:var(--text-primary);font-weight:600;margin-bottom:8px">
+                        请在弹出的浏览器中完成登录
+                    </p>
+                    <p style="font-size:13px;color:var(--text-muted)" id="smsWaitMsg">
+                        系统正在自动检测登录状态，请在浏览器中选择验证码登录...
+                    </p>
+                </div>
+                <button class="btn btn-success btn-lg" onclick="manualLoginConfirm()" id="confirmLoginBtn" style="width:100%;justify-content:center;padding:14px;margin-bottom:10px">
+                    <i class="ri-check-double-line"></i> 我已完成登录
+                </button>
+                <button class="btn btn-ghost" onclick="closeSmsModal()" style="width:100%;justify-content:center">
+                    <i class="ri-close-line"></i> 取消
+                </button>
+            </div>
+
+            <!-- Status Display -->
+            <div class="sms-status" id="smsStatus" style="display:none"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Theme Panel -->
+<div class="theme-panel" id="themePanel">
+    <h4><i class="ri-palette-line"></i> 选择主题风格</h4>
+    <div class="theme-grid">
+        <button class="theme-option active" data-theme-value="dark" onclick="setTheme('dark')">
+            <div class="theme-preview">
+                <div class="tp-bg" style="background:#0f1117"></div>
+                <div class="tp-accent" style="background:#4f8cff"></div>
+            </div>
+            <span class="theme-name">深邃夜空</span>
+        </button>
+        <button class="theme-option" data-theme-value="light" onclick="setTheme('light')">
+            <div class="theme-preview">
+                <div class="tp-bg" style="background:#f5f6fa"></div>
+                <div class="tp-accent" style="background:#4f8cff"></div>
+            </div>
+            <span class="theme-name">明亮日光</span>
+        </button>
+        <button class="theme-option" data-theme-value="ocean" onclick="setTheme('ocean')">
+            <div class="theme-preview">
+                <div class="tp-bg" style="background:#0a192f"></div>
+                <div class="tp-accent" style="background:#64ffda"></div>
+            </div>
+            <span class="theme-name">深海蓝</span>
+        </button>
+        <button class="theme-option" data-theme-value="purple" onclick="setTheme('purple')">
+            <div class="theme-preview">
+                <div class="tp-bg" style="background:#120d1f"></div>
+                <div class="tp-accent" style="background:#b388ff"></div>
+            </div>
+            <span class="theme-name">星空紫</span>
+        </button>
+        <button class="theme-option" data-theme-value="green" onclick="setTheme('green')">
+            <div class="theme-preview">
+                <div class="tp-bg" style="background:#0c1a0f"></div>
+                <div class="tp-accent" style="background:#69f0ae"></div>
+            </div>
+            <span class="theme-name">森林绿</span>
+        </button>
+        <button class="theme-option" data-theme-value="warm" onclick="setTheme('warm')">
+            <div class="theme-preview">
+                <div class="tp-bg" style="background:#1a1412"></div>
+                <div class="tp-accent" style="background:#ffab40"></div>
+            </div>
+            <span class="theme-name">暖阳橙</span>
+        </button>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner spinner-lg"></div>
+    <p id="loadingText">正在处理...</p>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+    // ─── State ────────────────────────────────────────────────────────────────
+    let currentFilter = 'all';
+    let allMessages = [];
+
+    // ─── Panel Navigation ─────────────────────────────────────────────────────
+    function switchPanel(panel) {
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-item[data-panel]').forEach(n => n.classList.remove('active'));
+        
+        document.getElementById(`panel-${panel}`).classList.add('active');
+        document.querySelector(`.nav-item[data-panel="${panel}"]`).classList.add('active');
+        
+        const titles = {
+            platforms: ['平台管理', '管理您的求职平台账号，一键登录所有平台'],
+            messages: ['消息中心', '查看所有求职平台推送的最新消息']
+        };
+        document.getElementById('pageTitle').textContent = titles[panel][0];
+        document.getElementById('pageSubtitle').textContent = titles[panel][1];
+        
+        if (panel === 'messages') {
+            loadMessages();
+            loadStats();
+        }
+        
+        // Close mobile sidebar
+        document.getElementById('sidebar').classList.remove('open');
+    }
+
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+    }
+
+    // ─── Credential Modal ─────────────────────────────────────────────────────
+    function openCredentialModal(platform, name, icon) {
+        document.getElementById('modalPlatform').value = platform;
+        document.getElementById('modalTitle').textContent = `${icon} 配置 ${name} 账号`;
+        document.getElementById('modalUsername').value = '';
+        document.getElementById('modalPassword').value = '';
+        document.getElementById('credentialModal').classList.add('active');
+    }
+
+    function closeCredentialModal() {
+        document.getElementById('credentialModal').classList.remove('active');
+    }
+
+    async function saveCredential(e) {
+        e.preventDefault();
+        const platform = document.getElementById('modalPlatform').value;
+        const username = document.getElementById('modalUsername').value;
+        const password = document.getElementById('modalPassword').value;
+        
+        try {
+            const data = await api('/api/credentials', {
+                method: 'POST',
+                body: JSON.stringify({ platform, username, password })
+            });
+            showToast(data.message, 'success');
+            closeCredentialModal();
+            // Update UI
+            document.getElementById(`credUser_${platform}`).textContent = username.substring(0, 3) + '***';
+        } catch (err) {}
+    }
+
+    // ─── Login ────────────────────────────────────────────────────────────────
+    async function loginPlatform(platform, name) {
+        const btn = document.getElementById(`loginBtn_${platform}`);
+        const origHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner"></span> 登录中...';
+        btn.disabled = true;
+        
+        try {
+            const data = await api(`/api/login/${platform}`, { method: 'POST' });
+            showToast(data.message, 'info');
+            
+            // Poll for status
+            pollLoginStatus(platform);
+        } catch (err) {
+            btn.innerHTML = origHtml;
+            btn.disabled = false;
+        }
+    }
+
+    async function loginAll() {
+        const btn = document.getElementById('loginAllBtn');
+        const origHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner"></span> 正在登录...';
+        btn.disabled = true;
+        
+        showLoading('正在登录所有平台，请在弹出的浏览器窗口中完成操作...');
+        
+        try {
+            const data = await api('/api/login-all', { method: 'POST' });
+            showToast(data.message, 'info');
+            
+            // Poll all platforms
+            setTimeout(() => {
+                loadPlatformStatus();
+                hideLoading();
+                btn.innerHTML = origHtml;
+                btn.disabled = false;
+            }, 5000);
+        } catch (err) {
+            hideLoading();
+            btn.innerHTML = origHtml;
+            btn.disabled = false;
+        }
+    }
+
+    function pollLoginStatus(platform) {
+        const interval = setInterval(async () => {
+            try {
+                const resp = await fetch('/api/credentials/status');
+                const data = await resp.json();
+                
+                if (data[platform]) {
+                    updatePlatformUI(platform, data[platform]);
+                    if (data[platform].is_logged_in) {
+                        clearInterval(interval);
+                        const btn = document.getElementById(`loginBtn_${platform}`);
+                        btn.innerHTML = '<i class="ri-login-box-line"></i> 登录';
+                        btn.disabled = false;
+                        showToast(`${platform} 登录成功!`, 'success');
+                    }
+                }
+            } catch (err) {}
+        }, 3000);
+        
+        // Stop polling after 2 minutes
+        setTimeout(() => clearInterval(interval), 120000);
+    }
+
+    async function loadPlatformStatus() {
+        try {
+            const resp = await fetch('/api/credentials/status');
+            const data = await resp.json();
+            for (const [platform, info] of Object.entries(data)) {
+                updatePlatformUI(platform, info);
+            }
+        } catch (err) {}
+    }
+
+    function updatePlatformUI(platform, info) {
+        const statusEl = document.getElementById(`platformStatus_${platform}`);
+        const dotEl = document.getElementById(`statusDot_${platform}`);
+        
+        if (info.is_logged_in) {
+            statusEl.className = 'platform-status online';
+            statusEl.innerHTML = '<span class="status-dot online"></span> 已连接';
+            dotEl.className = 'status-dot online';
+        } else {
+            statusEl.className = 'platform-status offline';
+            statusEl.innerHTML = '<span class="status-dot offline"></span> 未连接';
+            dotEl.className = 'status-dot offline';
+        }
+        
+        if (info.last_login) {
+            const d = new Date(info.last_login);
+            document.getElementById(`credLastLogin_${platform}`).textContent = 
+                `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+    }
+
+    // ─── Messages ─────────────────────────────────────────────────────────────
+    async function loadMessages(platformFilter) {
+        const url = platformFilter ? `/api/messages?platform=${platformFilter}` : '/api/messages';
+        try {
+            const resp = await fetch(url);
+            const data = await resp.json();
+            allMessages = data.messages;
+            renderMessages(allMessages);
+        } catch (err) {
+            console.error('Failed to load messages:', err);
+        }
+    }
+
+    async function loadStats() {
+        try {
+            const resp = await fetch('/api/messages/stats');
+            const data = await resp.json();
+            
+            document.getElementById('statTotal').textContent = data.total;
+            document.getElementById('statUnread').textContent = data.unread;
+            
+            let connectedCount = 0;
+            for (const [key, info] of Object.entries(data.by_platform)) {
+                document.getElementById(`filterCount_${key}`).textContent = info.total;
+                connectedCount++;
+            }
+            document.getElementById('statPlatforms').textContent = connectedCount;
+            
+            // Count today's messages
+            const today = new Date().toISOString().split('T')[0];
+            const todayCount = allMessages.filter(m => m.received_at && m.received_at.startsWith(today)).length;
+            document.getElementById('statToday').textContent = todayCount;
+            
+            // Update unread badge
+            const badge = document.getElementById('unreadBadge');
+            if (data.unread > 0) {
+                badge.textContent = data.unread;
+                badge.style.display = 'block';
+            } else {
+                badge.style.display = 'none';
+            }
+            
+            // Update summary
+            document.getElementById('msgCountSummary').textContent = 
+                data.total > 0 ? `${data.total} 条消息，${data.unread} 条未读` : '暂无消息';
+                
+        } catch (err) {
+            console.error('Failed to load stats:', err);
+        }
+    }
+
+    function renderMessages(messages) {
+        const container = document.getElementById('messageList');
+        
+        if (!messages || messages.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📭</div>
+                    <h3>暂无消息</h3>
+                    <p>请先登录求职平台账号，然后点击"刷新消息"获取最新推送信息</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = messages.map((msg, idx) => {
+            const time = msg.received_at ? formatTime(msg.received_at) : '';
+            const unreadClass = msg.is_read ? '' : 'unread';
+            const jobHtml = msg.job_title ? `<div class="msg-job"><i class="ri-briefcase-line"></i> ${escapeHtml(msg.job_title)}</div>` : '';
+            const companyHtml = msg.sender_company ? `<span class="company">@ ${escapeHtml(msg.sender_company)}</span>` : '';
+            
+            let tags = '';
+            if (msg.salary_range) {
+                tags += `<span class="msg-tag salary">💰 ${escapeHtml(msg.salary_range)}</span>`;
+            }
+            if (msg.message_type === 'invite') {
+                tags += `<span class="msg-tag type-invite">📨 面试邀请</span>`;
+            }
+            if (msg.message_type === 'system') {
+                tags += `<span class="msg-tag type-system">🔔 系统通知</span>`;
+            }
+            
+            return `
+                <div class="message-item ${unreadClass}" onclick="markRead(${msg.id})" style="animation-delay: ${idx * 0.05}s">
+                    <div class="msg-platform-badge" style="background:${msg.platform_color}15;color:${msg.platform_color}">
+                        ${msg.platform_icon}
+                    </div>
+                    <div class="msg-body">
+                        <div class="msg-top-row">
+                            <div class="msg-sender">
+                                ${escapeHtml(msg.sender_name || '未知')}
+                                ${companyHtml}
+                            </div>
+                            <div class="msg-time">${time}</div>
+                        </div>
+                        ${jobHtml}
+                        <div class="msg-content">${escapeHtml(msg.content || '')}</div>
+                        ${tags ? `<div class="msg-tags">${tags}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function filterMessages(filter) {
+        currentFilter = filter;
+        document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+        document.querySelector(`.filter-chip[data-filter="${filter}"]`).classList.add('active');
+        
+        if (filter === 'all') {
+            loadMessages();
+        } else {
+            loadMessages(filter);
+        }
+    }
+
+    async function markRead(messageId) {
+        try {
+            await api(`/api/messages/${messageId}/read`, { method: 'POST' });
+            // Update local state
+            const msg = allMessages.find(m => m.id === messageId);
+            if (msg) msg.is_read = true;
+            loadStats();
+        } catch (err) {}
+    }
+
+    async function refreshMessages() {
+        showLoading('正在从所有平台获取最新消息...');
+        try {
+            await api('/api/messages/refresh', { method: 'POST' });
+            showToast('消息刷新请求已发送', 'info');
+            
+            // Wait a moment then reload
+            setTimeout(async () => {
+                await loadMessages(currentFilter === 'all' ? undefined : currentFilter);
+                await loadStats();
+                hideLoading();
+                showToast('消息已更新', 'success');
+            }, 3000);
+        } catch (err) {
+            hideLoading();
+        }
+    }
+
+    // ─── Demo Data ────────────────────────────────────────────────────────────
+    async function loadDemoData() {
+        try {
+            const data = await api('/api/demo-data', { method: 'POST' });
+            showToast(data.message, 'success');
+            await loadStats();
+        } catch (err) {}
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+    function formatTime(isoString) {
+        const d = new Date(isoString);
+        const now = new Date();
+        const diff = now - d;
+        
+        if (diff < 60000) return '刚刚';
+        if (diff < 3600000) return `${Math.floor(diff/60000)}分钟前`;
+        if (diff < 86400000) return `${Math.floor(diff/3600000)}小时前`;
+        if (diff < 604800000) return `${Math.floor(diff/86400000)}天前`;
+        return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function showLoading(text) {
+        document.getElementById('loadingText').textContent = text || '正在处理...';
+        document.getElementById('loadingOverlay').classList.add('active');
+    }
+
+    function hideLoading() {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+
+    // ─── Manual Login (Browser-based with Persistent Profile) ─────────────────
+    let currentManualPlatform = null;
+    let currentManualName = null;
+    let manualPollInterval = null;
+
+    function smsLoginPlatform(platform, name) {
+        currentManualPlatform = platform;
+        currentManualName = name;
+        
+        // Reset modal
+        document.getElementById('smsModalTitle').textContent = `📱 ${name} - 手机验证码登录`;
+        document.getElementById('smsPhase1').style.display = 'block';
+        document.getElementById('smsPhase2').style.display = 'none';
+        document.getElementById('smsStatus').style.display = 'none';
+        
+        // Reset steps
+        document.getElementById('smsStep1').className = 'sms-step active';
+        document.getElementById('smsStep2').className = 'sms-step';
+        document.getElementById('smsStep3').className = 'sms-step';
+        
+        document.getElementById('startSmsBtn').disabled = false;
+        document.getElementById('startSmsBtn').innerHTML = '<i class="ri-external-link-line"></i> 打开浏览器并登录';
+        
+        document.getElementById('smsModal').classList.add('active');
+    }
+
+    async function startSmsLogin() {
+        const btn = document.getElementById('startSmsBtn');
+        btn.innerHTML = '<span class="spinner"></span> 正在打开浏览器...';
+        btn.disabled = true;
+        
+        try {
+            const resp = await fetch(`/api/manual-login/${currentManualPlatform}`, { method: 'POST' });
+            const data = await resp.json();
+            
+            if (data.success) {
+                // Move to waiting phase
+                document.getElementById('smsPhase1').style.display = 'none';
+                document.getElementById('smsPhase2').style.display = 'block';
+                
+                document.getElementById('smsStep1').className = 'sms-step';
+                document.getElementById('smsStep2').className = 'sms-step active';
+                
+                showToast(data.message, 'info');
+                
+                // Start polling for login status
+                startManualPolling();
+            } else {
+                showToast(data.message, 'error');
+                btn.innerHTML = '<i class="ri-external-link-line"></i> 打开浏览器并登录';
+                btn.disabled = false;
+            }
+        } catch (err) {
+            showToast('网络错误，请重试', 'error');
+            btn.innerHTML = '<i class="ri-external-link-line"></i> 打开浏览器并登录';
+            btn.disabled = false;
+        }
+    }
+
+    function startManualPolling() {
+        if (manualPollInterval) clearInterval(manualPollInterval);
+        
+        manualPollInterval = setInterval(async () => {
+            try {
+                const resp = await fetch(`/api/manual-login/${currentManualPlatform}/status`);
+                const data = await resp.json();
+                
+                if (data.is_logged_in || data.login_success) {
+                    clearInterval(manualPollInterval);
+                    manualPollInterval = null;
+                    
+                    // Success!
+                    document.getElementById('smsPhase2').style.display = 'none';
+                    document.getElementById('smsStep2').className = 'sms-step';
+                    document.getElementById('smsStep3').className = 'sms-step active';
+                    
+                    const statusEl = document.getElementById('smsStatus');
+                    statusEl.style.display = 'flex';
+                    statusEl.className = 'sms-status success';
+                    statusEl.innerHTML = '<i class="ri-check-line"></i><span>✅ 登录成功！</span>';
+                    
+                    showToast(`${currentManualName} 登录成功！`, 'success');
+                    loadPlatformStatus();
+                    
+                    setTimeout(() => closeSmsModal(), 2000);
+                } else if (data.login_timeout) {
+                    clearInterval(manualPollInterval);
+                    manualPollInterval = null;
+                    
+                    document.getElementById('smsWaitMsg').innerHTML = 
+                        '<span style="color:var(--accent-red)">登录超时，请点击「我已完成登录」或重试</span>';
+                }
+            } catch (err) {}
+        }, 3000);
+        
+        // Stop polling after 3 minutes
+        setTimeout(() => {
+            if (manualPollInterval) {
+                clearInterval(manualPollInterval);
+                manualPollInterval = null;
+                document.getElementById('smsWaitMsg').innerHTML = 
+                    '<span style="color:var(--accent-red)">等待超时，可点击「我已完成登录」手动确认</span>';
+            }
+        }, 180000);
+    }
+
+    async function manualLoginConfirm() {
+        if (!currentManualPlatform) return;
+        
+        const btn = document.getElementById('confirmLoginBtn');
+        if (btn) {
+            btn.innerHTML = '<span class="spinner"></span> 检测中...';
+            btn.disabled = true;
+        }
+        
+        try {
+            const resp = await fetch(`/api/manual-login/${currentManualPlatform}/confirm`, { method: 'POST' });
+            const data = await resp.json();
+            
+            if (data.success) {
+                // Success!
+                if (manualPollInterval) {
+                    clearInterval(manualPollInterval);
+                    manualPollInterval = null;
+                }
+                
+                document.getElementById('smsPhase2').style.display = 'none';
+                document.getElementById('smsStep2').className = 'sms-step';
+                document.getElementById('smsStep3').className = 'sms-step active';
+                
+                const statusEl = document.getElementById('smsStatus');
+                statusEl.style.display = 'flex';
+                statusEl.className = 'sms-status success';
+                statusEl.innerHTML = '<i class="ri-check-line"></i><span>✅ 登录状态已确认！</span>';
+                
+                showToast(`${currentManualName} 登录成功！`, 'success');
+                loadPlatformStatus();
+                
+                setTimeout(() => closeSmsModal(), 2000);
+            } else {
+                showToast(data.message, 'error');
+                if (btn) {
+                    btn.innerHTML = '<i class="ri-check-double-line"></i> 我已完成登录';
+                    btn.disabled = false;
+                }
+            }
+        } catch (err) {
+            showToast('网络错误，请重试', 'error');
+            if (btn) {
+                btn.innerHTML = '<i class="ri-check-double-line"></i> 我已完成登录';
+                btn.disabled = false;
+            }
+        }
+    }
+
+    function showSmsStatus(message, type) {
+        const el = document.getElementById('smsStatus');
+        el.style.display = 'flex';
+        el.className = `sms-status ${type}`;
+        const icon = type === 'success' ? 'ri-check-line' : type === 'error' ? 'ri-error-warning-line' : 'ri-information-line';
+        el.innerHTML = `<i class="${icon}"></i><span>${message}</span>`;
+    }
+
+    function closeSmsModal() {
+        document.getElementById('smsModal').classList.remove('active');
+        if (manualPollInterval) {
+            clearInterval(manualPollInterval);
+            manualPollInterval = null;
+        }
+        currentManualPlatform = null;
+        currentManualName = null;
+        loadPlatformStatus();
+    }
+
+    // ─── Theme Switching ──────────────────────────────────────────────────────
+    function toggleThemePanel() {
+        document.getElementById('themePanel').classList.toggle('active');
+    }
+
+    function setTheme(theme) {
+        // Remove active from all theme options
+        document.querySelectorAll('.theme-option').forEach(o => o.classList.remove('active'));
+        // Add active to selected
+        document.querySelector(`.theme-option[data-theme-value="${theme}"]`).classList.add('active');
+        
+        // Apply theme
+        if (theme === 'dark') {
+            document.documentElement.removeAttribute('data-theme');
+        } else {
+            document.documentElement.setAttribute('data-theme', theme);
+        }
+        
+        // Save preference
+        localStorage.setItem('findjob-theme', theme);
+        
+        showToast(`已切换到${getThemeName(theme)}主题`, 'success');
+    }
+
+    function getThemeName(theme) {
+        const names = {
+            'dark': '深邃夜空',
+            'light': '明亮日光',
+            'ocean': '深海蓝',
+            'purple': '星空紫',
+            'green': '森林绿',
+            'warm': '暖阳橙'
+        };
+        return names[theme] || theme;
+    }
+
+    function loadSavedTheme() {
+        const saved = localStorage.getItem('findjob-theme');
+        if (saved) {
+            setTheme(saved);
+        }
+    }
+
+    // Close theme panel on outside click
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('themePanel');
+        const btn = e.target.closest('[onclick*="toggleThemePanel"]');
+        if (panel.classList.contains('active') && !panel.contains(e.target) && !btn) {
+            panel.classList.remove('active');
+        }
+    });
+
+    // ─── Init ─────────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSavedTheme();
+        loadPlatformStatus();
+        loadStats();
+    });
+    
+    // Close modal on overlay click
+    document.getElementById('credentialModal').addEventListener('click', function(e) {
+        if (e.target === this) closeCredentialModal();
+    });
+    document.getElementById('smsModal').addEventListener('click', function(e) {
+        if (e.target === this) closeSmsModal();
+    });
+    
+    // Keyboard shortcut: Escape to close modal
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            closeCredentialModal();
+            closeSmsModal();
+        }
+    });
+</script>
+{% endblock %}

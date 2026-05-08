@@ -1,0 +1,10 @@
+flask
+flask-sqlalchemy
+flask-login
+flask-cors
+playwright
+cryptography
+python-dotenv
+apscheduler
+requests
+beautifulsoup4
