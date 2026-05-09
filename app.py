@@ -14,7 +14,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from config import Config
-from models import db, User, PlatformCredential, Message, Cipher
+from models import db, User, PlatformCredential, Message, Resume, JobPost, Delivery, Cipher
 from scrapers import get_scraper, SCRAPERS
 
 app = Flask(__name__)
@@ -653,38 +653,75 @@ def fetch_platform_messages(user_id: int, platform: str):
 
 
 def refresh_messages(user_id: int):
-    """Refresh messages from all logged-in platforms."""
+    """
+    Refresh messages from all logged-in platforms.
+    New messages are deduplicated by (user, platform, external_id); if a
+    scraper doesn't provide external_id, one is derived from content hash.
+    Returns the list of message dicts that were actually newly inserted.
+    """
     with app.app_context():
         creds = PlatformCredential.query.filter_by(
             user_id=user_id, is_logged_in=True
         ).all()
-    
-    all_messages = []
+
+    new_messages = []
     for cred in creds:
         try:
             msgs = fetch_platform_messages(user_id, cred.platform)
-            for msg_data in msgs:
-                msg = Message(
-                    user_id=user_id,
-                    platform=cred.platform,
-                    sender_name=msg_data.get('sender_name', ''),
-                    sender_company=msg_data.get('sender_company', ''),
-                    content=msg_data.get('content', ''),
-                    job_title=msg_data.get('job_title', ''),
-                    salary_range=msg_data.get('salary_range', ''),
-                    message_type=msg_data.get('message_type', 'chat'),
-                    external_url=msg_data.get('external_url', ''),
-                    received_at=datetime.fromisoformat(msg_data['received_at']) if msg_data.get('received_at') else datetime.utcnow()
-                )
-                db.session.add(msg)
-                all_messages.append(msg_data)
-            
-            cred.last_check = datetime.utcnow()
-            db.session.commit()
+            with app.app_context():
+                cred_in_ctx = PlatformCredential.query.get(cred.id)
+                for msg_data in msgs:
+                    ext_id = (msg_data.get('external_id') or '').strip()
+                    if not ext_id:
+                        # Derive a stable id from sender + content + job.
+                        import hashlib as _h
+                        key = '|'.join([
+                            (msg_data.get('sender_name') or '').strip()[:120],
+                            (msg_data.get('content') or '').strip()[:200],
+                            (msg_data.get('job_title') or '').strip()[:120],
+                        ])
+                        ext_id = _h.sha1(key.encode('utf-8')).hexdigest()[:32] if key.strip('|') else ''
+
+                    # Dedup.
+                    if ext_id:
+                        exists = Message.query.filter_by(
+                            user_id=user_id,
+                            platform=cred_in_ctx.platform,
+                            external_id=ext_id,
+                        ).first()
+                        if exists:
+                            continue
+
+                    try:
+                        received_at = (
+                            datetime.fromisoformat(msg_data['received_at'])
+                            if msg_data.get('received_at') else datetime.utcnow()
+                        )
+                    except (ValueError, TypeError):
+                        received_at = datetime.utcnow()
+
+                    msg = Message(
+                        user_id=user_id,
+                        platform=cred_in_ctx.platform,
+                        sender_name=msg_data.get('sender_name', ''),
+                        sender_company=msg_data.get('sender_company', ''),
+                        content=msg_data.get('content', ''),
+                        job_title=msg_data.get('job_title', ''),
+                        salary_range=msg_data.get('salary_range', ''),
+                        message_type=msg_data.get('message_type', 'chat'),
+                        external_id=ext_id or None,
+                        external_url=msg_data.get('external_url', ''),
+                        received_at=received_at,
+                    )
+                    db.session.add(msg)
+                    new_messages.append(msg_data)
+
+                cred_in_ctx.last_check = datetime.utcnow()
+                db.session.commit()
         except Exception as e:
             print(f"Error fetching messages from {cred.platform}: {e}")
-    
-    return all_messages
+
+    return new_messages
 
 
 @app.route('/api/messages')
@@ -806,8 +843,29 @@ def get_platforms():
 
 # ─── Initialize DB ───────────────────────────────────────────────────────────
 
+def _run_light_migrations():
+    """
+    Idempotent best-effort SQLite migrations for existing databases that
+    predate the current schema. Safe to run every boot.
+    """
+    from sqlalchemy import text
+    stmts = [
+        # Indexes on messages (external_id) — added when we introduced dedup.
+        "CREATE INDEX IF NOT EXISTS ix_messages_external_id ON messages(external_id)",
+        "CREATE INDEX IF NOT EXISTS ix_messages_user_platform_ext "
+        "ON messages(user_id, platform, external_id)",
+    ]
+    with db.engine.begin() as conn:
+        for s in stmts:
+            try:
+                conn.execute(text(s))
+            except Exception as e:
+                print(f"[migration] skipped: {s} ({e})")
+
+
 with app.app_context():
     db.create_all()
+    _run_light_migrations()
 
 # ─── Demo Data ───────────────────────────────────────────────────────────────
 
@@ -965,6 +1023,477 @@ def load_demo_data():
     
     db.session.commit()
     return jsonify({'success': True, 'message': f'已加载 {len(demo_messages)} 条演示消息'})
+
+
+# ─── Resume API ──────────────────────────────────────────────────────────────
+
+def _resume_to_dict(r: Resume) -> dict:
+    return {
+        'id': r.id,
+        'name': r.name,
+        'title': r.title or '',
+        'years_exp': r.years_exp,
+        'education': r.education or '',
+        'expected_salary': r.expected_salary or '',
+        'expected_city': r.expected_city or '',
+        'skills': r.skills or '',
+        'summary': r.summary or '',
+        'greeting': r.greeting or '',
+        'is_default': r.is_default,
+        'updated_at': r.updated_at.isoformat() if r.updated_at else None,
+    }
+
+
+def _safe_int(v):
+    try:
+        if v is None or v == '':
+            return None
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route('/api/resumes', methods=['GET'])
+@login_required
+def list_resumes():
+    items = Resume.query.filter_by(user_id=current_user.id).order_by(
+        Resume.is_default.desc(), Resume.updated_at.desc()
+    ).all()
+    return jsonify([_resume_to_dict(r) for r in items])
+
+
+@app.route('/api/resumes', methods=['POST'])
+@login_required
+def create_resume():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': '简历名称不能为空'}), 400
+
+    is_default = bool(data.get('is_default'))
+    if is_default:
+        Resume.query.filter_by(user_id=current_user.id, is_default=True).update(
+            {'is_default': False})
+
+    r = Resume(
+        user_id=current_user.id,
+        name=name,
+        title=(data.get('title') or '').strip() or None,
+        years_exp=_safe_int(data.get('years_exp')),
+        education=(data.get('education') or '').strip() or None,
+        expected_salary=(data.get('expected_salary') or '').strip() or None,
+        expected_city=(data.get('expected_city') or '').strip() or None,
+        skills=(data.get('skills') or '').strip() or None,
+        summary=(data.get('summary') or '').strip() or None,
+        greeting=(data.get('greeting') or '').strip() or None,
+        is_default=is_default,
+    )
+    db.session.add(r)
+    db.session.commit()
+    return jsonify({'success': True, 'resume': _resume_to_dict(r)})
+
+
+@app.route('/api/resumes/<int:resume_id>', methods=['PUT'])
+@login_required
+def update_resume(resume_id):
+    r = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not r:
+        return jsonify({'success': False, 'message': '简历不存在'}), 404
+
+    data = request.get_json() or {}
+    for field in ('name', 'title', 'education', 'expected_salary',
+                  'expected_city', 'skills', 'summary', 'greeting'):
+        if field in data:
+            val = (data.get(field) or '').strip()
+            setattr(r, field, val or None)
+    if 'years_exp' in data:
+        r.years_exp = _safe_int(data.get('years_exp'))
+    if 'is_default' in data:
+        want_default = bool(data.get('is_default'))
+        if want_default:
+            Resume.query.filter(
+                Resume.user_id == current_user.id,
+                Resume.id != r.id
+            ).update({'is_default': False})
+        r.is_default = want_default
+
+    db.session.commit()
+    return jsonify({'success': True, 'resume': _resume_to_dict(r)})
+
+
+@app.route('/api/resumes/<int:resume_id>', methods=['DELETE'])
+@login_required
+def delete_resume(resume_id):
+    r = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not r:
+        return jsonify({'success': False, 'message': '简历不存在'}), 404
+    # Unlink deliveries that reference this resume, don't cascade-delete them.
+    Delivery.query.filter_by(resume_id=r.id).update({'resume_id': None})
+    db.session.delete(r)
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+# ─── Job Search API ──────────────────────────────────────────────────────────
+
+def _search_jobs_sync(user_id: int, platform: str, keyword: str,
+                      city: str, limit: int) -> dict:
+    """Run a platform job search in a fresh persistent browser session."""
+    scraper = get_scraper(platform)
+    if not getattr(scraper, 'supports_delivery', False):
+        return {'success': False, 'message': f'{Config.PLATFORMS[platform]["name"]} 暂不支持职位搜索'}
+
+    async def _run():
+        await scraper.start_browser(headless=False, persistent=True)
+        try:
+            if not await scraper.check_login_by_cookies():
+                probe = await scraper._context.new_page()
+                if not await scraper.check_login_status(probe):
+                    return {'success': False, 'message': '未登录或登录已失效，请先登录该平台'}
+            page = await scraper._context.new_page()
+            items = await scraper.search_jobs(page, keyword=keyword, city=city, limit=limit)
+            return {'success': True, 'items': items}
+        finally:
+            await scraper.stop_browser()
+
+    return run_async_in_thread(_run())
+
+
+@app.route('/api/jobs/search', methods=['POST'])
+@login_required
+def jobs_search():
+    """
+    Search jobs on a specific platform. Results are cached into JobPost so
+    deliveries can reference a stable id.
+    """
+    data = request.get_json() or {}
+    platform = data.get('platform')
+    keyword = (data.get('keyword') or '').strip()
+    city = (data.get('city') or '').strip()
+    try:
+        limit = min(int(data.get('limit', 20) or 20), 50)
+    except (TypeError, ValueError):
+        limit = 20
+
+    if platform not in Config.PLATFORMS:
+        return jsonify({'success': False, 'message': '未知平台'}), 400
+    if not keyword:
+        return jsonify({'success': False, 'message': '请输入搜索关键词'}), 400
+
+    result = _search_jobs_sync(current_user.id, platform, keyword, city, limit)
+    if not result.get('success'):
+        return jsonify(result), 400
+
+    out = []
+    for j in result['items']:
+        ext_id = j.get('external_id')
+        if not ext_id:
+            continue
+        jp = JobPost.query.filter_by(platform=platform, external_id=ext_id).first()
+        if not jp:
+            jp = JobPost(platform=platform, external_id=ext_id)
+            db.session.add(jp)
+        jp.title = j.get('title') or jp.title
+        jp.company = j.get('company') or jp.company
+        jp.salary_range = j.get('salary_range') or jp.salary_range
+        jp.city = j.get('city') or jp.city
+        jp.experience = j.get('experience') or jp.experience
+        jp.education = j.get('education') or jp.education
+        tags = j.get('tags')
+        if isinstance(tags, list):
+            jp.tags = ','.join(str(t) for t in tags if t)
+        elif tags:
+            jp.tags = str(tags)
+        jp.description = j.get('description') or jp.description
+        jp.url = j.get('url') or jp.url
+        jp.scraped_at = datetime.utcnow()
+        db.session.flush()
+        out.append({
+            'id': jp.id,
+            'platform': platform,
+            'platform_name': Config.PLATFORMS[platform]['name'],
+            'platform_icon': Config.PLATFORMS[platform]['icon'],
+            'external_id': jp.external_id,
+            'title': jp.title or '',
+            'company': jp.company or '',
+            'salary_range': jp.salary_range or '',
+            'city': jp.city or '',
+            'tags': [t for t in (jp.tags or '').split(',') if t],
+            'url': jp.url or '',
+        })
+    db.session.commit()
+
+    return jsonify({'success': True, 'jobs': out, 'total': len(out)})
+
+
+# ─── Delivery API ────────────────────────────────────────────────────────────
+
+def _delivery_to_dict(d: Delivery) -> dict:
+    platform_info = Config.PLATFORMS.get(d.platform, {})
+    return {
+        'id': d.id,
+        'platform': d.platform,
+        'platform_name': platform_info.get('name', d.platform),
+        'platform_icon': platform_info.get('icon', '💼'),
+        'job_title': d.job_title or '',
+        'company': d.company or '',
+        'salary_range': d.salary_range or '',
+        'greeting_sent': d.greeting_sent or '',
+        'status': d.status,
+        'error_message': d.error_message or '',
+        'external_url': d.external_url or '',
+        'sent_at': d.sent_at.isoformat() if d.sent_at else None,
+        'created_at': d.created_at.isoformat() if d.created_at else None,
+    }
+
+
+@app.route('/api/deliveries', methods=['GET'])
+@login_required
+def list_deliveries():
+    platform = request.args.get('platform')
+    status = request.args.get('status')
+    q = Delivery.query.filter_by(user_id=current_user.id)
+    if platform:
+        q = q.filter_by(platform=platform)
+    if status:
+        q = q.filter_by(status=status)
+    q = q.order_by(Delivery.created_at.desc())
+    rows = q.limit(200).all()
+    return jsonify([_delivery_to_dict(d) for d in rows])
+
+
+@app.route('/api/deliveries/stats', methods=['GET'])
+@login_required
+def delivery_stats():
+    total = Delivery.query.filter_by(user_id=current_user.id).count()
+    by_status = {}
+    for st in (Delivery.STATUS_PENDING, Delivery.STATUS_SENDING,
+               Delivery.STATUS_SUCCESS, Delivery.STATUS_FAILED,
+               Delivery.STATUS_REPLIED):
+        by_status[st] = Delivery.query.filter_by(
+            user_id=current_user.id, status=st
+        ).count()
+    return jsonify({'total': total, 'by_status': by_status})
+
+
+@app.route('/api/deliveries', methods=['POST'])
+@login_required
+def create_delivery():
+    """Submit greetings to one or more jobs (batch). Runs in background."""
+    data = request.get_json() or {}
+    job_ids = data.get('job_ids') or []
+    resume_id = data.get('resume_id')
+    greeting_override = (data.get('greeting') or '').strip()
+
+    if not isinstance(job_ids, list) or not job_ids:
+        return jsonify({'success': False, 'message': '请选择要投递的职位'}), 400
+
+    jobs = JobPost.query.filter(JobPost.id.in_(job_ids)).all()
+    if not jobs:
+        return jsonify({'success': False, 'message': '未找到对应职位'}), 400
+
+    resume = None
+    if resume_id:
+        resume = Resume.query.filter_by(id=resume_id, user_id=current_user.id).first()
+    if not resume:
+        resume = Resume.query.filter_by(user_id=current_user.id, is_default=True).first()
+
+    greeting_text = greeting_override or (resume.greeting if resume else '')
+    if not greeting_text:
+        return jsonify({'success': False,
+                        'message': '请先设置打招呼语（可在简历或本次投递中填写）'}), 400
+
+    created = []
+    for jp in jobs:
+        d = Delivery(
+            user_id=current_user.id,
+            resume_id=resume.id if resume else None,
+            job_post_id=jp.id,
+            platform=jp.platform,
+            job_title=jp.title,
+            company=jp.company,
+            salary_range=jp.salary_range,
+            greeting_sent=greeting_text,
+            status=Delivery.STATUS_PENDING,
+            external_url=jp.url,
+        )
+        db.session.add(d)
+        created.append(d)
+    db.session.commit()
+
+    delivery_ids = [d.id for d in created]
+    threading.Thread(
+        target=_run_deliveries_background,
+        args=(current_user.id, delivery_ids),
+        daemon=True,
+    ).start()
+
+    return jsonify({'success': True,
+                    'message': f'已创建 {len(created)} 条投递任务',
+                    'delivery_ids': delivery_ids})
+
+
+@app.route('/api/deliveries/<int:delivery_id>', methods=['DELETE'])
+@login_required
+def delete_delivery(delivery_id):
+    d = Delivery.query.filter_by(id=delivery_id, user_id=current_user.id).first()
+    if not d:
+        return jsonify({'success': False, 'message': '记录不存在'}), 404
+    db.session.delete(d)
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+def _run_deliveries_background(user_id: int, delivery_ids):
+    """Send greetings for the given deliveries. Groups by platform so we
+    reuse a single browser session per platform."""
+    with app.app_context():
+        rows = Delivery.query.filter(
+            Delivery.user_id == user_id,
+            Delivery.id.in_(delivery_ids)
+        ).all()
+        by_platform = {}
+        for d in rows:
+            by_platform.setdefault(d.platform, []).append(d.id)
+
+    for platform, ids in by_platform.items():
+        try:
+            _deliver_one_platform(user_id, platform, ids)
+        except Exception as e:
+            print(f"[delivery] platform {platform} fatal: {e}")
+
+
+def _deliver_one_platform(user_id: int, platform: str, delivery_ids):
+    scraper = get_scraper(platform)
+    if not getattr(scraper, 'supports_delivery', False):
+        with app.app_context():
+            Delivery.query.filter(Delivery.id.in_(delivery_ids)).update(
+                {'status': Delivery.STATUS_FAILED,
+                 'error_message': f'{platform} 暂不支持自动投递'},
+                synchronize_session=False,
+            )
+            db.session.commit()
+        return
+
+    async def _run():
+        await scraper.start_browser(headless=False, persistent=True)
+        try:
+            if not await scraper.check_login_by_cookies():
+                probe = await scraper._context.new_page()
+                if not await scraper.check_login_status(probe):
+                    raise RuntimeError('未登录或登录已失效')
+
+            for did in delivery_ids:
+                with app.app_context():
+                    d = Delivery.query.get(did)
+                    if not d:
+                        continue
+                    jp = d.job_post
+                    d.status = Delivery.STATUS_SENDING
+                    db.session.commit()
+                    job_payload = {
+                        'url': jp.url if jp else d.external_url,
+                        'title': jp.title if jp else d.job_title,
+                        'company': jp.company if jp else d.company,
+                    }
+                    greeting = d.greeting_sent or ''
+
+                page = await scraper._context.new_page()
+                try:
+                    result = await scraper.submit_greeting(page, job_payload, greeting)
+                except Exception as e:
+                    result = {'success': False, 'message': f'运行时异常: {e}'}
+                finally:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
+
+                with app.app_context():
+                    d = Delivery.query.get(did)
+                    if not d:
+                        continue
+                    if result.get('success'):
+                        d.status = Delivery.STATUS_SUCCESS
+                        d.sent_at = datetime.utcnow()
+                        d.error_message = result.get('message') or None
+                        if result.get('external_url'):
+                            d.external_url = result['external_url']
+                    else:
+                        d.status = Delivery.STATUS_FAILED
+                        d.error_message = result.get('message') or '未知错误'
+                    db.session.commit()
+
+                await asyncio.sleep(3)  # be polite
+        finally:
+            try:
+                await scraper.stop_browser()
+            except Exception:
+                pass
+
+    try:
+        run_async_in_thread(_run())
+    except Exception as e:
+        with app.app_context():
+            Delivery.query.filter(
+                Delivery.id.in_(delivery_ids),
+                Delivery.status.in_([Delivery.STATUS_PENDING, Delivery.STATUS_SENDING])
+            ).update(
+                {'status': Delivery.STATUS_FAILED,
+                 'error_message': f'批次失败: {e}'},
+                synchronize_session=False,
+            )
+            db.session.commit()
+
+
+# ─── Background Auto-Refresh (scheduler) ─────────────────────────────────────
+
+def _scheduled_refresh_all_users():
+    """For every user with at least one logged-in credential, refresh
+    messages. Runs inside the scheduler's own thread."""
+    try:
+        with app.app_context():
+            user_ids = [
+                row[0] for row in db.session.query(PlatformCredential.user_id)
+                .filter_by(is_logged_in=True)
+                .distinct()
+                .all()
+            ]
+        for uid in user_ids:
+            try:
+                refresh_messages(uid)
+            except Exception as e:
+                print(f"[scheduler] refresh failed for user {uid}: {e}")
+    except Exception as e:
+        print(f"[scheduler] job fatal: {e}")
+
+
+def _start_scheduler():
+    """Register and start the background scheduler exactly once.
+
+    Flask's dev reloader spawns a second process; guard against double-start.
+    """
+    if scheduler.running:
+        return
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' and app.debug:
+        # Parent reloader process — don't run jobs here; let the child do it.
+        return
+    try:
+        scheduler.add_job(
+            _scheduled_refresh_all_users,
+            trigger='interval',
+            minutes=int(os.environ.get('MSG_REFRESH_MINUTES', '3')),
+            id='auto_refresh_messages',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.start()
+    except Exception as e:
+        print(f"[scheduler] start failed: {e}")
+
+
+_start_scheduler()
 
 
 if __name__ == '__main__':

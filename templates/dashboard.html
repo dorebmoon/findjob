@@ -967,6 +967,77 @@
             flex-direction: column;
         }
     }
+
+    /* Resume / Job / Delivery cards */
+    .card-list { display: flex; flex-direction: column; gap: 10px; }
+    .card-row {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        transition: var(--transition);
+    }
+    .card-row:hover { border-color: var(--accent-blue); }
+    .card-row .row-main { flex: 1; min-width: 0; }
+    .card-row .row-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .card-row .row-sub {
+        font-size: 13px;
+        color: var(--text-secondary);
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .card-row .row-sub .sep { color: var(--text-muted); }
+    .card-row .row-actions { display: flex; gap: 8px; align-items: center; }
+    .tag-pill {
+        padding: 2px 8px;
+        background: var(--bg-tertiary);
+        border-radius: 10px;
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+    .salary-pill {
+        color: var(--accent-orange);
+        font-weight: 600;
+        font-size: 14px;
+    }
+    .default-pill {
+        padding: 2px 8px;
+        background: rgba(79, 140, 255, 0.15);
+        color: var(--accent-blue);
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    .job-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: var(--accent-blue);
+    }
+    .status-pill {
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .status-pill.pending { background: rgba(255, 171, 64, 0.15); color: var(--accent-orange); }
+    .status-pill.sending { background: rgba(79, 140, 255, 0.15); color: var(--accent-blue); }
+    .status-pill.success { background: rgba(76, 217, 100, 0.15); color: var(--accent-green); }
+    .status-pill.failed  { background: rgba(255, 69, 58, 0.15);  color: var(--accent-red); }
+    .status-pill.replied { background: rgba(179, 136, 255, 0.15); color: #b388ff; }
 </style>
 {% endblock %}
 
@@ -991,6 +1062,16 @@
                 <div class="nav-item" data-panel="messages" onclick="switchPanel('messages')">
                     <i class="ri-message-3-line"></i> 消息中心
                     <span class="badge" id="unreadBadge" style="display:none">0</span>
+                </div>
+                <div class="nav-item" data-panel="resumes" onclick="switchPanel('resumes')">
+                    <i class="ri-file-user-line"></i> 简历管理
+                </div>
+                <div class="nav-item" data-panel="jobs" onclick="switchPanel('jobs')">
+                    <i class="ri-search-2-line"></i> 找工作
+                </div>
+                <div class="nav-item" data-panel="deliveries" onclick="switchPanel('deliveries')">
+                    <i class="ri-send-plane-2-line"></i> 投递记录
+                    <span class="badge" id="deliveryBadge" style="display:none">0</span>
                 </div>
             </div>
 
@@ -1174,6 +1255,91 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Resumes Panel -->
+            <div class="panel" id="panel-resumes">
+                <div class="messages-header">
+                    <div></div>
+                    <button class="btn btn-primary btn-sm" onclick="openResumeModal()">
+                        <i class="ri-add-line"></i> 新建简历
+                    </button>
+                </div>
+                <div id="resumeList">
+                    <div class="empty-state">
+                        <div class="empty-icon">📄</div>
+                        <h3>还没有简历</h3>
+                        <p>创建一份简历，在投递职位时系统会自动带上你的打招呼语</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Jobs Panel -->
+            <div class="panel" id="panel-jobs">
+                <div class="stats-grid" style="grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:20px">
+                    <div>
+                        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">平台</label>
+                        <select id="jobPlatform" class="form-input" style="height:42px">
+                            <option value="boss">👔 Boss直聘（已支持）</option>
+                            <option value="zhilian" disabled>🌐 智联招聘（开发中）</option>
+                            <option value="qiancheng" disabled>📋 前程无忧（开发中）</option>
+                            <option value="tongcheng" disabled>🏙️ 58同城（开发中）</option>
+                            <option value="yupao" disabled>🐟 鱼泡直聘（开发中）</option>
+                            <option value="liepin" disabled>🎯 猎聘（开发中）</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">关键词</label>
+                        <input type="text" id="jobKeyword" class="form-input" placeholder="Python / 前端 / 产品经理..." style="height:42px">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">城市（可选）</label>
+                        <input type="text" id="jobCity" class="form-input" placeholder="深圳 / 北京..." style="height:42px">
+                    </div>
+                    <button class="btn btn-primary" onclick="searchJobs()" id="searchJobsBtn" style="height:42px">
+                        <i class="ri-search-line"></i> 搜索
+                    </button>
+                </div>
+
+                <div class="messages-header" id="jobsActionBar" style="display:none">
+                    <div style="font-size:13px;color:var(--text-secondary)">
+                        已选 <span id="selectedJobCount" style="color:var(--accent-blue);font-weight:600">0</span> 个职位
+                    </div>
+                    <button class="btn btn-success btn-sm" onclick="openDeliveryModal()">
+                        <i class="ri-send-plane-line"></i> 批量投递
+                    </button>
+                </div>
+
+                <div id="jobList">
+                    <div class="empty-state">
+                        <div class="empty-icon">🔎</div>
+                        <h3>搜索职位开始投递</h3>
+                        <p>目前 Boss 直聘已支持搜索和自动打招呼投递，其他平台建设中</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deliveries Panel -->
+            <div class="panel" id="panel-deliveries">
+                <div class="stats-grid" id="deliveryStatsGrid">
+                    <div class="stat-card"><div class="stat-label">总投递</div><div class="stat-value" id="dStatTotal">0</div></div>
+                    <div class="stat-card"><div class="stat-label">待发送</div><div class="stat-value" id="dStatPending" style="color:var(--accent-orange)">0</div></div>
+                    <div class="stat-card"><div class="stat-label">已发送</div><div class="stat-value" id="dStatSuccess" style="color:var(--accent-green)">0</div></div>
+                    <div class="stat-card"><div class="stat-label">失败</div><div class="stat-value" id="dStatFailed" style="color:var(--accent-red)">0</div></div>
+                </div>
+                <div class="messages-header">
+                    <div></div>
+                    <button class="btn btn-ghost btn-sm" onclick="loadDeliveries()">
+                        <i class="ri-refresh-line"></i> 刷新
+                    </button>
+                </div>
+                <div id="deliveryList">
+                    <div class="empty-state">
+                        <div class="empty-icon">📨</div>
+                        <h3>还没有投递记录</h3>
+                        <p>在「找工作」中选择职位后点击批量投递即可开始</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 </div>
@@ -1276,10 +1442,89 @@
     </div>
 </div>
 
+<!-- Resume Edit Modal -->
+<div class="modal-overlay" id="resumeModal">
+    <div class="modal" style="max-width:540px">
+        <div class="modal-header">
+            <h3 id="resumeModalTitle">新建简历</h3>
+            <button class="modal-close" onclick="closeResumeModal()"><i class="ri-close-line"></i></button>
+        </div>
+        <form onsubmit="saveResume(event)">
+            <input type="hidden" id="resumeId" value="">
+            <div class="form-group">
+                <label>简历名称 *</label>
+                <input type="text" id="resumeName" class="form-input" placeholder="例如：Python后端工程师" required>
+            </div>
+            <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div><label>期望职位</label>
+                    <input type="text" id="resumeTitle" class="form-input" placeholder="Python开发工程师"></div>
+                <div><label>工作年限</label>
+                    <input type="number" id="resumeYears" class="form-input" placeholder="3"></div>
+            </div>
+            <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div><label>学历</label>
+                    <input type="text" id="resumeEducation" class="form-input" placeholder="本科"></div>
+                <div><label>期望薪资</label>
+                    <input type="text" id="resumeSalary" class="form-input" placeholder="25K-40K"></div>
+            </div>
+            <div class="form-group">
+                <label>期望城市</label>
+                <input type="text" id="resumeCity" class="form-input" placeholder="深圳">
+            </div>
+            <div class="form-group">
+                <label>技能标签（英文逗号分隔）</label>
+                <input type="text" id="resumeSkills" class="form-input" placeholder="Python, Django, PostgreSQL">
+            </div>
+            <div class="form-group">
+                <label>自我介绍</label>
+                <textarea id="resumeSummary" class="form-input" rows="3" placeholder="简单介绍你的经历和亮点..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>投递打招呼语 *</label>
+                <textarea id="resumeGreeting" class="form-input" rows="3" placeholder="你好，我是一名 X 年经验的 Python 后端，看到贵司的 XX 岗位与我的经历很匹配，希望能进一步沟通。"></textarea>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:8px">
+                <input type="checkbox" id="resumeDefault">
+                <label for="resumeDefault" style="margin:0;cursor:pointer">设为默认简历（批量投递时自动使用）</label>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:20px">
+                <button type="button" class="btn btn-ghost" onclick="closeResumeModal()" style="flex:1;justify-content:center">取消</button>
+                <button type="submit" class="btn btn-primary" style="flex:1;justify-content:center"><i class="ri-save-line"></i> 保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delivery Confirm Modal -->
+<div class="modal-overlay" id="deliveryModal">
+    <div class="modal" style="max-width:520px">
+        <div class="modal-header">
+            <h3>确认批量投递</h3>
+            <button class="modal-close" onclick="closeDeliveryModal()"><i class="ri-close-line"></i></button>
+        </div>
+        <div>
+            <div class="form-group">
+                <label>使用简历</label>
+                <select id="deliveryResume" class="form-input"></select>
+            </div>
+            <div class="form-group">
+                <label>本次打招呼语（留空则使用简历中的招呼语）</label>
+                <textarea id="deliveryGreeting" class="form-input" rows="3" placeholder="留空则使用简历中的默认招呼语"></textarea>
+            </div>
+            <div id="deliverySelectedPreview" style="background:var(--bg-tertiary);border-radius:var(--radius-md);padding:12px;font-size:13px;color:var(--text-secondary);max-height:180px;overflow-y:auto"></div>
+            <div style="display:flex;gap:10px;margin-top:20px">
+                <button type="button" class="btn btn-ghost" onclick="closeDeliveryModal()" style="flex:1;justify-content:center">取消</button>
+                <button type="button" class="btn btn-success" onclick="submitDelivery()" style="flex:1;justify-content:center" id="submitDeliveryBtn">
+                    <i class="ri-send-plane-line"></i> 确认投递
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Theme Panel -->
 <div class="theme-panel" id="themePanel">
-    <h4><i class="ri-palette-line"></i> 选择主题风格</h4>
-    <div class="theme-grid">
+    <h4><i class="ri-palette-line"></i> 选择主题风格</h4>    <div class="theme-grid">
         <button class="theme-option active" data-theme-value="dark" onclick="setTheme('dark')">
             <div class="theme-preview">
                 <div class="tp-bg" style="background:#0f1117"></div>
@@ -1337,6 +1582,12 @@
     // ─── State ────────────────────────────────────────────────────────────────
     let currentFilter = 'all';
     let allMessages = [];
+    // Resume / Job search / Delivery state
+    let allResumes = [];
+    let currentJobs = [];
+    let selectedJobIds = new Set();
+    let autoRefreshTimer = null;
+    let deliveryPollTimer = null;
 
     // ─── Panel Navigation ─────────────────────────────────────────────────────
     function switchPanel(panel) {
@@ -1348,14 +1599,26 @@
         
         const titles = {
             platforms: ['平台管理', '管理您的求职平台账号，一键登录所有平台'],
-            messages: ['消息中心', '查看所有求职平台推送的最新消息']
+            messages: ['消息中心', '查看所有求职平台推送的最新消息'],
+            resumes: ['简历管理', '管理你的简历和投递打招呼语'],
+            jobs: ['找工作', '搜索职位并一键批量投递'],
+            deliveries: ['投递记录', '查看你的投递状态与结果']
         };
-        document.getElementById('pageTitle').textContent = titles[panel][0];
-        document.getElementById('pageSubtitle').textContent = titles[panel][1];
+        const t = titles[panel] || ['', ''];
+        document.getElementById('pageTitle').textContent = t[0];
+        document.getElementById('pageSubtitle').textContent = t[1];
         
         if (panel === 'messages') {
             loadMessages();
             loadStats();
+        } else if (panel === 'resumes') {
+            loadResumes();
+        } else if (panel === 'jobs') {
+            // Make sure the platform selector only shows supported platforms.
+            loadResumes();
+        } else if (panel === 'deliveries') {
+            loadDeliveries();
+            loadDeliveryStats();
         }
         
         // Close mobile sidebar
@@ -1911,6 +2174,8 @@
         loadSavedTheme();
         loadPlatformStatus();
         loadStats();
+        loadDeliveryStats();
+        startAutoRefresh();
     });
     
     // Close modal on overlay click
@@ -1920,13 +2185,409 @@
     document.getElementById('smsModal').addEventListener('click', function(e) {
         if (e.target === this) closeSmsModal();
     });
+    document.getElementById('resumeModal').addEventListener('click', function(e) {
+        if (e.target === this) closeResumeModal();
+    });
+    document.getElementById('deliveryModal').addEventListener('click', function(e) {
+        if (e.target === this) closeDeliveryModal();
+    });
     
     // Keyboard shortcut: Escape to close modal
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
             closeCredentialModal();
             closeSmsModal();
+            closeResumeModal();
+            closeDeliveryModal();
         }
     });
+
+    // ─── Background auto-refresh ──────────────────────────────────────────────
+    // Every 30s pull stats; if unread or delivery count changed AND the user
+    // is on that panel, refresh the visible list.
+    function startAutoRefresh() {
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        autoRefreshTimer = setInterval(() => {
+            loadStats();
+            loadDeliveryStats();
+            // If user is on messages panel, pull in anything new.
+            const onMessages = document.getElementById('panel-messages').classList.contains('active');
+            if (onMessages) loadMessages();
+            const onDeliveries = document.getElementById('panel-deliveries').classList.contains('active');
+            if (onDeliveries) loadDeliveries();
+        }, 30000);
+    }
+
+    // ─── Resume ───────────────────────────────────────────────────────────────
+    async function loadResumes() {
+        try {
+            const resp = await fetch('/api/resumes');
+            allResumes = await resp.json();
+        } catch (err) { allResumes = []; }
+        renderResumes();
+        renderResumeSelectInDelivery();
+    }
+
+    function renderResumes() {
+        const wrap = document.getElementById('resumeList');
+        if (!wrap) return;
+        if (!allResumes.length) {
+            wrap.innerHTML = `<div class="empty-state">
+                <div class="empty-icon">📄</div>
+                <h3>还没有简历</h3>
+                <p>创建一份简历，在投递职位时系统会自动带上你的打招呼语</p>
+            </div>`;
+            return;
+        }
+        const html = allResumes.map(r => `
+            <div class="card-row">
+              <div class="row-main">
+                <div class="row-title">
+                  ${escapeHtml(r.name)}
+                  ${r.is_default ? '<span class="default-pill">默认</span>' : ''}
+                  ${r.title ? `<span class="tag-pill">${escapeHtml(r.title)}</span>` : ''}
+                </div>
+                <div class="row-sub">
+                  ${r.years_exp != null ? `<span>${r.years_exp} 年经验</span><span class="sep">·</span>` : ''}
+                  ${r.education ? `<span>${escapeHtml(r.education)}</span><span class="sep">·</span>` : ''}
+                  ${r.expected_salary ? `<span>期望 ${escapeHtml(r.expected_salary)}</span><span class="sep">·</span>` : ''}
+                  ${r.expected_city ? `<span>${escapeHtml(r.expected_city)}</span>` : ''}
+                </div>
+                ${r.greeting ? `<div class="row-sub" style="margin-top:6px;color:var(--text-muted)">
+                  <i class="ri-double-quotes-l"></i> ${escapeHtml(r.greeting.slice(0, 80))}${r.greeting.length > 80 ? '...' : ''}
+                </div>` : ''}
+              </div>
+              <div class="row-actions">
+                <button class="btn btn-ghost btn-sm" onclick="openResumeModal(${r.id})"><i class="ri-edit-line"></i> 编辑</button>
+                <button class="btn btn-ghost btn-sm" onclick="deleteResume(${r.id})" style="color:var(--accent-red)"><i class="ri-delete-bin-line"></i></button>
+              </div>
+            </div>
+        `).join('');
+        wrap.innerHTML = `<div class="card-list">${html}</div>`;
+    }
+
+    function openResumeModal(id) {
+        const modal = document.getElementById('resumeModal');
+        const r = id ? allResumes.find(x => x.id === id) : null;
+        document.getElementById('resumeModalTitle').textContent = r ? '编辑简历' : '新建简历';
+        document.getElementById('resumeId').value = r ? r.id : '';
+        document.getElementById('resumeName').value = r ? r.name : '';
+        document.getElementById('resumeTitle').value = r ? r.title || '' : '';
+        document.getElementById('resumeYears').value = r && r.years_exp != null ? r.years_exp : '';
+        document.getElementById('resumeEducation').value = r ? r.education || '' : '';
+        document.getElementById('resumeSalary').value = r ? r.expected_salary || '' : '';
+        document.getElementById('resumeCity').value = r ? r.expected_city || '' : '';
+        document.getElementById('resumeSkills').value = r ? r.skills || '' : '';
+        document.getElementById('resumeSummary').value = r ? r.summary || '' : '';
+        document.getElementById('resumeGreeting').value = r ? r.greeting || '' : '';
+        document.getElementById('resumeDefault').checked = r ? !!r.is_default : false;
+        modal.classList.add('active');
+    }
+
+    function closeResumeModal() {
+        document.getElementById('resumeModal').classList.remove('active');
+    }
+
+    async function saveResume(e) {
+        e.preventDefault();
+        const id = document.getElementById('resumeId').value;
+        const body = {
+            name: document.getElementById('resumeName').value.trim(),
+            title: document.getElementById('resumeTitle').value.trim(),
+            years_exp: document.getElementById('resumeYears').value,
+            education: document.getElementById('resumeEducation').value.trim(),
+            expected_salary: document.getElementById('resumeSalary').value.trim(),
+            expected_city: document.getElementById('resumeCity').value.trim(),
+            skills: document.getElementById('resumeSkills').value.trim(),
+            summary: document.getElementById('resumeSummary').value.trim(),
+            greeting: document.getElementById('resumeGreeting').value.trim(),
+            is_default: document.getElementById('resumeDefault').checked,
+        };
+        try {
+            const url = id ? `/api/resumes/${id}` : '/api/resumes';
+            const method = id ? 'PUT' : 'POST';
+            const resp = await fetch(url, {
+                method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showToast('简历已保存', 'success');
+                closeResumeModal();
+                loadResumes();
+            } else {
+                showToast(data.message || '保存失败', 'error');
+            }
+        } catch (err) {
+            showToast('网络错误', 'error');
+        }
+    }
+
+    async function deleteResume(id) {
+        if (!confirm('确认删除这份简历？已关联的投递记录会保留。')) return;
+        const resp = await fetch(`/api/resumes/${id}`, {method: 'DELETE'});
+        const data = await resp.json();
+        if (data.success) {
+            showToast('已删除', 'success');
+            loadResumes();
+        } else {
+            showToast(data.message || '删除失败', 'error');
+        }
+    }
+
+    // ─── Job search ───────────────────────────────────────────────────────────
+    async function searchJobs() {
+        const platform = document.getElementById('jobPlatform').value;
+        const keyword = document.getElementById('jobKeyword').value.trim();
+        const city = document.getElementById('jobCity').value.trim();
+        if (!keyword) { showToast('请输入搜索关键词', 'error'); return; }
+
+        const btn = document.getElementById('searchJobsBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> 搜索中...';
+
+        try {
+            const resp = await fetch('/api/jobs/search', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({platform, keyword, city, limit: 30})
+            });
+            const data = await resp.json();
+            if (data.success) {
+                currentJobs = data.jobs || [];
+                selectedJobIds.clear();
+                renderJobs();
+                if (!currentJobs.length) {
+                    showToast('没有找到匹配的职位', 'info');
+                }
+            } else {
+                showToast(data.message || '搜索失败', 'error');
+            }
+        } catch (err) {
+            showToast('网络错误', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="ri-search-line"></i> 搜索';
+        }
+    }
+
+    function renderJobs() {
+        const wrap = document.getElementById('jobList');
+        const bar = document.getElementById('jobsActionBar');
+        if (!currentJobs.length) {
+            bar.style.display = 'none';
+            wrap.innerHTML = `<div class="empty-state">
+                <div class="empty-icon">🔎</div>
+                <h3>暂无结果</h3>
+                <p>换个关键词试试，或确认该平台已登录</p>
+            </div>`;
+            return;
+        }
+        bar.style.display = 'flex';
+        document.getElementById('selectedJobCount').textContent = selectedJobIds.size;
+
+        const html = currentJobs.map(j => {
+            const checked = selectedJobIds.has(j.id) ? 'checked' : '';
+            const tags = (j.tags || []).slice(0, 4).map(t =>
+                `<span class="tag-pill">${escapeHtml(t)}</span>`).join('');
+            return `
+            <div class="card-row">
+              <input type="checkbox" class="job-checkbox" ${checked}
+                onchange="toggleJobSelection(${j.id})">
+              <div class="row-main">
+                <div class="row-title">
+                  ${escapeHtml(j.title || '(未命名)')}
+                  <span class="salary-pill">${escapeHtml(j.salary_range || '')}</span>
+                </div>
+                <div class="row-sub">
+                  <span>${j.platform_icon || '💼'} ${escapeHtml(j.company || '')}</span>
+                  ${j.city ? `<span class="sep">·</span><span>${escapeHtml(j.city)}</span>` : ''}
+                </div>
+                ${tags ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${tags}</div>` : ''}
+              </div>
+              <div class="row-actions">
+                ${j.url ? `<a href="${j.url}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+                  <i class="ri-external-link-line"></i>
+                </a>` : ''}
+              </div>
+            </div>`;
+        }).join('');
+        wrap.innerHTML = `<div class="card-list">${html}</div>`;
+    }
+
+    function toggleJobSelection(id) {
+        if (selectedJobIds.has(id)) selectedJobIds.delete(id);
+        else selectedJobIds.add(id);
+        document.getElementById('selectedJobCount').textContent = selectedJobIds.size;
+    }
+
+    // ─── Delivery ─────────────────────────────────────────────────────────────
+    function renderResumeSelectInDelivery() {
+        const sel = document.getElementById('deliveryResume');
+        if (!sel) return;
+        if (!allResumes.length) {
+            sel.innerHTML = '<option value="">（无简历，请先创建）</option>';
+            return;
+        }
+        const def = allResumes.find(r => r.is_default) || allResumes[0];
+        sel.innerHTML = allResumes.map(r =>
+            `<option value="${r.id}" ${r.id === def.id ? 'selected' : ''}>
+                ${escapeHtml(r.name)}${r.is_default ? '（默认）' : ''}
+            </option>`
+        ).join('');
+    }
+
+    function openDeliveryModal() {
+        if (selectedJobIds.size === 0) {
+            showToast('请先勾选要投递的职位', 'error');
+            return;
+        }
+        // Fresh resume list so the select is up to date.
+        loadResumes();
+
+        const selected = currentJobs.filter(j => selectedJobIds.has(j.id));
+        const preview = selected.map(j =>
+            `<div style="padding:6px 0">
+                ${j.platform_icon || '💼'} <b>${escapeHtml(j.title)}</b>
+                <span style="color:var(--text-muted)"> · ${escapeHtml(j.company)}</span>
+                ${j.salary_range ? `<span class="salary-pill" style="margin-left:6px">${escapeHtml(j.salary_range)}</span>` : ''}
+            </div>`
+        ).join('');
+        document.getElementById('deliverySelectedPreview').innerHTML =
+            preview || '<i style="color:var(--text-muted)">未选择职位</i>';
+        document.getElementById('deliveryGreeting').value = '';
+        document.getElementById('deliveryModal').classList.add('active');
+    }
+
+    function closeDeliveryModal() {
+        document.getElementById('deliveryModal').classList.remove('active');
+    }
+
+    async function submitDelivery() {
+        const btn = document.getElementById('submitDeliveryBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> 提交中...';
+        try {
+            const resp = await fetch('/api/deliveries', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    job_ids: Array.from(selectedJobIds),
+                    resume_id: parseInt(document.getElementById('deliveryResume').value) || null,
+                    greeting: document.getElementById('deliveryGreeting').value.trim()
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showToast(data.message || '已提交', 'success');
+                closeDeliveryModal();
+                selectedJobIds.clear();
+                renderJobs();
+                loadDeliveryStats();
+                switchPanel('deliveries');
+            } else {
+                showToast(data.message || '提交失败', 'error');
+            }
+        } catch (err) {
+            showToast('网络错误', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="ri-send-plane-line"></i> 确认投递';
+        }
+    }
+
+    async function loadDeliveries() {
+        try {
+            const resp = await fetch('/api/deliveries');
+            const rows = await resp.json();
+            renderDeliveries(rows);
+        } catch (err) {}
+    }
+
+    function renderDeliveries(rows) {
+        const wrap = document.getElementById('deliveryList');
+        if (!rows || !rows.length) {
+            wrap.innerHTML = `<div class="empty-state">
+                <div class="empty-icon">📨</div>
+                <h3>还没有投递记录</h3>
+                <p>在「找工作」中选择职位后点击批量投递即可开始</p>
+            </div>`;
+            return;
+        }
+        const html = rows.map(d => `
+            <div class="card-row">
+              <div class="row-main">
+                <div class="row-title">
+                  ${d.platform_icon} ${escapeHtml(d.job_title || '(未知职位)')}
+                  <span class="status-pill ${d.status}">${statusLabel(d.status)}</span>
+                  ${d.salary_range ? `<span class="salary-pill">${escapeHtml(d.salary_range)}</span>` : ''}
+                </div>
+                <div class="row-sub">
+                  <span>${escapeHtml(d.company || '')}</span>
+                  <span class="sep">·</span>
+                  <span>${d.created_at ? new Date(d.created_at).toLocaleString() : ''}</span>
+                  ${d.sent_at ? `<span class="sep">·</span><span style="color:var(--accent-green)">已发送</span>` : ''}
+                </div>
+                ${d.error_message ? `<div style="font-size:12px;color:var(--accent-red);margin-top:4px">
+                    ${escapeHtml(d.error_message)}
+                </div>` : ''}
+                ${d.greeting_sent ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                    <i class="ri-double-quotes-l"></i> ${escapeHtml(d.greeting_sent.slice(0, 80))}${d.greeting_sent.length > 80 ? '...' : ''}
+                </div>` : ''}
+              </div>
+              <div class="row-actions">
+                ${d.external_url ? `<a href="${d.external_url}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+                    <i class="ri-external-link-line"></i>
+                </a>` : ''}
+                <button class="btn btn-ghost btn-sm" onclick="deleteDelivery(${d.id})" style="color:var(--accent-red)">
+                    <i class="ri-delete-bin-line"></i>
+                </button>
+              </div>
+            </div>
+        `).join('');
+        wrap.innerHTML = `<div class="card-list">${html}</div>`;
+    }
+
+    function statusLabel(s) {
+        const map = {
+            pending: '待发送', sending: '发送中',
+            success: '已发送', failed: '失败', replied: '已回复'
+        };
+        return map[s] || s;
+    }
+
+    async function loadDeliveryStats() {
+        try {
+            const resp = await fetch('/api/deliveries/stats');
+            const data = await resp.json();
+            document.getElementById('dStatTotal').textContent = data.total || 0;
+            const s = data.by_status || {};
+            document.getElementById('dStatPending').textContent = (s.pending || 0) + (s.sending || 0);
+            document.getElementById('dStatSuccess').textContent = s.success || 0;
+            document.getElementById('dStatFailed').textContent = s.failed || 0;
+
+            // Sidebar badge — show when there's active work.
+            const badge = document.getElementById('deliveryBadge');
+            const active = (s.pending || 0) + (s.sending || 0);
+            if (active > 0) {
+                badge.textContent = active;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        } catch (err) {}
+    }
+
+    async function deleteDelivery(id) {
+        if (!confirm('删除这条投递记录？')) return;
+        const resp = await fetch(`/api/deliveries/${id}`, {method: 'DELETE'});
+        const data = await resp.json();
+        if (data.success) {
+            showToast('已删除', 'success');
+            loadDeliveries();
+            loadDeliveryStats();
+        }
+    }
 </script>
 {% endblock %}

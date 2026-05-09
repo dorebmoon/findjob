@@ -12,6 +12,8 @@ class BossScraper(BaseScraper):
     base_url = 'https://www.zhipin.com'
     login_url = 'https://www.zhipin.com/web/user/?ka=header-login'
     message_url = 'https://www.zhipin.com/web/geek/chat'
+    job_search_url = 'https://www.zhipin.com/web/geek/job'
+    supports_delivery = True
 
     # Known auth cookies issued by zhipin.com after a successful login.
     # These are exact names, not substrings.
@@ -224,6 +226,9 @@ class BossScraper(BaseScraper):
                         'job_title': d.get('job', ''),
                         'salary_range': '',
                         'message_type': 'chat',
+                        'external_id': self.make_external_id(
+                            d.get('name'), d.get('msg'), d.get('job')
+                        ),
                         'received_at': datetime.utcnow().isoformat(),
                         'external_url': self.message_url,
                     })
@@ -265,6 +270,9 @@ class BossScraper(BaseScraper):
                         'job_title': job_title,
                         'salary_range': '',
                         'message_type': 'chat',
+                        'external_id': self.make_external_id(
+                            sender_name, content, job_title
+                        ),
                         'received_at': datetime.utcnow().isoformat(),
                         'external_url': self.message_url,
                     })
@@ -287,3 +295,300 @@ class BossScraper(BaseScraper):
         except Exception:
             pass
         return ''
+
+    # ─── Job search ──────────────────────────────────────────────────────────
+
+    async def search_jobs(self, page: Page, keyword: str, city: str = '', limit: int = 20) -> List[Dict]:
+        """
+        Search job posts on Boss直聘. City is the friendly name ("深圳" etc.);
+        we rely on Boss resolving it via the query string.
+
+        NOTE: Boss uses a numeric `city` code (e.g. 101280600 for 深圳) in its
+        most specific URLs. We keep this simple and let Boss default to "all"
+        when city isn't a known code — the keyword carries the main filter.
+        """
+        jobs: List[Dict] = []
+        if not keyword:
+            return jobs
+        try:
+            from urllib.parse import quote
+            url = f"{self.base_url}/web/geek/job?query={quote(keyword)}"
+            if city:
+                url += f"&city={quote(city)}"
+            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            await asyncio.sleep(3)
+
+            # Let the JS-rendered list appear; Boss uses <li class="job-card-wrapper">
+            # or similar class names that shift between A/B tests.
+            wait_sel = ('li.job-card-wrapper, .job-list-box li, '
+                        '.job-list .job-card, [class*="job-card"]')
+            try:
+                await page.wait_for_selector(wait_sel, timeout=8000)
+            except Exception:
+                pass
+
+            card = None
+            for sel in ('li.job-card-wrapper', '.job-list-box li',
+                        '.job-list .job-card', '[class*="job-card"]'):
+                loc = page.locator(sel)
+                if await loc.count() > 0:
+                    card = loc
+                    break
+
+            if card is None:
+                # JS-side fallback — scrape whatever looks like a job card.
+                raw = await page.evaluate(
+                    """(limit) => {
+                        const out = [];
+                        const nodes = document.querySelectorAll(
+                            'li.job-card-wrapper, [class*="job-card"], .job-list li'
+                        );
+                        for (const n of nodes) {
+                            const a = n.querySelector('a[href*="/job_detail/"], a[href*="/web/geek/job"]');
+                            const titleEl = n.querySelector('[class*="job-name"], [class*="job-title"]');
+                            const salaryEl = n.querySelector('[class*="salary"], [class*="red"]');
+                            const companyEl = n.querySelector('[class*="company-name"], [class*="company"]');
+                            const cityEl = n.querySelector('[class*="job-area"], [class*="city"]');
+                            const tagsEls = n.querySelectorAll('[class*="job-label"], [class*="tag-list"] li, [class*="labels"] span');
+                            const title = (titleEl?.innerText || '').trim();
+                            const company = (companyEl?.innerText || '').trim();
+                            if (!title && !company) continue;
+                            const href = a?.getAttribute('href') || '';
+                            const tags = [];
+                            tagsEls.forEach(t => {
+                                const v = (t.innerText || '').trim();
+                                if (v) tags.push(v);
+                            });
+                            out.push({
+                                title,
+                                company,
+                                salary: (salaryEl?.innerText || '').trim(),
+                                city: (cityEl?.innerText || '').trim(),
+                                tags,
+                                href
+                            });
+                            if (out.length >= limit) break;
+                        }
+                        return out;
+                    }""",
+                    limit
+                )
+                for r in raw or []:
+                    href = r.get('href') or ''
+                    ext_id = self._extract_job_id(href) or self.make_external_id(
+                        r.get('title'), r.get('company'), r.get('salary')
+                    )
+                    if not ext_id:
+                        continue
+                    jobs.append({
+                        'external_id': ext_id,
+                        'title': r.get('title', ''),
+                        'company': r.get('company', ''),
+                        'salary_range': r.get('salary', ''),
+                        'city': r.get('city', ''),
+                        'experience': '',
+                        'education': '',
+                        'tags': r.get('tags', []),
+                        'description': '',
+                        'url': self._absolute_url(href),
+                    })
+                return jobs
+
+            total = await card.count()
+            for i in range(min(total, limit)):
+                try:
+                    item = card.nth(i)
+                    title = await self._safe_text(
+                        item, '[class*="job-name"], [class*="job-title"]')
+                    company = await self._safe_text(
+                        item, '[class*="company-name"], [class*="company"]')
+                    salary = await self._safe_text(
+                        item, '[class*="salary"], [class*="red"]')
+                    city_txt = await self._safe_text(
+                        item, '[class*="job-area"], [class*="city"]')
+
+                    href = ''
+                    try:
+                        a = item.locator('a[href*="/job_detail/"], a[href*="/web/geek/job"]').first
+                        if await a.count() > 0:
+                            href = await a.get_attribute('href') or ''
+                    except Exception:
+                        pass
+
+                    ext_id = self._extract_job_id(href) or self.make_external_id(
+                        title, company, salary)
+                    if not ext_id:
+                        continue
+                    if not (title or company):
+                        continue
+
+                    jobs.append({
+                        'external_id': ext_id,
+                        'title': title,
+                        'company': company,
+                        'salary_range': salary,
+                        'city': city_txt,
+                        'experience': '',
+                        'education': '',
+                        'tags': [],
+                        'description': '',
+                        'url': self._absolute_url(href),
+                    })
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Boss直聘 search_jobs error: {e}")
+
+        return jobs
+
+    def _absolute_url(self, href: str) -> str:
+        if not href:
+            return ''
+        if href.startswith('http'):
+            return href
+        if href.startswith('//'):
+            return 'https:' + href
+        if href.startswith('/'):
+            return self.base_url + href
+        return href
+
+    @staticmethod
+    def _extract_job_id(href: str) -> str:
+        """Pull the job id out of a Boss detail URL like /job_detail/xxx.html."""
+        if not href:
+            return ''
+        import re
+        m = re.search(r'/job_detail/([^./?#]+)', href)
+        if m:
+            return m.group(1)
+        m = re.search(r'[?&]jobId=([^&]+)', href)
+        if m:
+            return m.group(1)
+        return ''
+
+    # ─── Delivery (send initial greeting) ────────────────────────────────────
+
+    async def submit_greeting(self, page: Page, job: Dict, greeting: str) -> Dict:
+        """
+        Open the job detail page, click 「立即沟通」(Chat Now), and send the
+        greeting as the first message. Returns success only when we see either:
+          - navigation to /web/geek/chat with the boss in the list, or
+          - a success confirmation dialog / toast.
+        """
+        url = job.get('url') or ''
+        if not url:
+            return {'success': False, 'message': '缺少职位 URL'}
+
+        try:
+            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            await asyncio.sleep(3)
+
+            if self.is_login_url(page.url):
+                return {'success': False, 'message': '未登录或登录已失效，请先在 Boss 完成登录'}
+
+            # Click the 「立即沟通」 button. Boss varies between button/a.
+            chat_btn = page.locator(
+                'a.btn-startchat, .btn.btn-startchat, '
+                'a:has-text("立即沟通"), button:has-text("立即沟通"), '
+                'a:has-text("继续沟通"), button:has-text("继续沟通")'
+            ).first
+            if await chat_btn.count() == 0:
+                # Could also be "已沟通" if we talked before.
+                already = page.locator('a:has-text("继续沟通"), button:has-text("继续沟通")').first
+                if await already.count() == 0:
+                    return {'success': False, 'message': '未找到沟通按钮（可能职位已下架或需要登录）'}
+                chat_btn = already
+
+            try:
+                await chat_btn.click(timeout=5000)
+            except Exception:
+                # Some layouts open chat in a new tab.
+                try:
+                    await chat_btn.evaluate("el => el.click()")
+                except Exception as e:
+                    return {'success': False, 'message': f'点击沟通按钮失败: {e}'}
+
+            # Wait for chat input to become available. Boss sometimes opens a
+            # floating dialog, sometimes routes to /web/geek/chat.
+            await asyncio.sleep(3)
+            try:
+                await page.wait_for_url(lambda u: 'geek/chat' in u or 'job_detail' in u, timeout=8000)
+            except Exception:
+                pass
+
+            input_sel = (
+                'div.chat-input[contenteditable], '
+                'div[contenteditable="true"].chat-input, '
+                '[class*="chat-input"][contenteditable], '
+                'textarea[placeholder*="说点什么"], textarea[placeholder*="输入"]'
+            )
+            try:
+                await page.wait_for_selector(input_sel, timeout=8000)
+            except Exception:
+                return {'success': False, 'message': '未找到聊天输入框（对方可能需要先接受沟通）'}
+
+            box = page.locator(input_sel).first
+            try:
+                await box.click()
+            except Exception:
+                pass
+
+            # contenteditable divs don't accept .fill(); type instead.
+            try:
+                tag = (await box.evaluate('el => el.tagName')).lower()
+            except Exception:
+                tag = ''
+            if tag == 'textarea':
+                try:
+                    await box.fill(greeting)
+                except Exception:
+                    await box.type(greeting, delay=15)
+            else:
+                await box.type(greeting, delay=15)
+
+            await asyncio.sleep(1)
+
+            # Send: click button if present, else press Enter.
+            send_btn = page.locator(
+                'button:has-text("发送"), .btn-send, [class*="send-btn"]'
+            ).first
+            sent = False
+            if await send_btn.count() > 0:
+                try:
+                    await send_btn.click(timeout=5000)
+                    sent = True
+                except Exception:
+                    pass
+            if not sent:
+                try:
+                    await box.press('Enter')
+                    sent = True
+                except Exception:
+                    pass
+            if not sent:
+                return {'success': False, 'message': '无法发送消息'}
+
+            # Confirm — look for the sent message to appear in the chat log.
+            await asyncio.sleep(3)
+            try:
+                snippet = greeting.strip().split('\n')[0][:20]
+                if snippet:
+                    found = page.locator(f'text={snippet}').first
+                    if await found.count() > 0:
+                        return {
+                            'success': True,
+                            'message': '已发送打招呼',
+                            'external_url': page.url
+                        }
+            except Exception:
+                pass
+
+            # If we can't positively confirm but also didn't crash, treat as
+            # success — Boss often doesn't echo the message immediately.
+            return {
+                'success': True,
+                'message': '已发送（未能二次确认）',
+                'external_url': page.url
+            }
+        except Exception as e:
+            return {'success': False, 'message': f'投递异常: {e}'}

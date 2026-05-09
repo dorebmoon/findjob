@@ -1,5 +1,6 @@
 import asyncio
 import os
+import hashlib
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -179,6 +180,17 @@ class BaseScraper(ABC):
         except Exception:
             return False
 
+    @staticmethod
+    def make_external_id(*parts) -> str:
+        """
+        Build a stable id for dedup from arbitrary string parts (sender name,
+        content snippet, job title, etc). Empty parts are skipped.
+        """
+        joined = '|'.join(str(p or '').strip()[:200] for p in parts if p is not None)
+        if not joined:
+            return ''
+        return hashlib.sha1(joined.encode('utf-8')).hexdigest()[:32]
+
     @abstractmethod
     async def login(self, username: str, password: str, page: Page) -> Dict:
         """Perform login with username/password."""
@@ -193,3 +205,30 @@ class BaseScraper(ABC):
     async def check_login_status(self, page: Page) -> bool:
         """Check if user is currently logged in."""
         pass
+
+    # ───── Job search / delivery (optional per-platform) ──────────────────────
+    # Subclasses SHOULD override these. The default implementations signal that
+    # delivery isn't supported on the platform yet; callers must check the
+    # 'supported' flag / raise path.
+
+    supports_delivery: bool = False
+
+    async def search_jobs(self, page: Page, keyword: str, city: str = '', limit: int = 20) -> List[Dict]:
+        """
+        Search job posts on the platform.
+        Each dict should have: external_id, title, company, salary_range, city,
+        experience, education, tags (list[str]), description, url.
+        Default returns []; subclasses override.
+        """
+        return []
+
+    async def submit_greeting(self, page: Page, job: Dict, greeting: str) -> Dict:
+        """
+        Send an initial application / greeting for a job.
+        Returns: {success: bool, message: str, external_url?: str}
+        Default refuses: subclasses override.
+        """
+        return {
+            'success': False,
+            'message': f'{self.platform_name} 暂不支持自动投递'
+        }

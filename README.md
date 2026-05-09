@@ -193,3 +193,30 @@ python cleanup.py --cache      # 仅清理 Python 缓存
 | POST | `/api/messages/<id>/read` | 标记消息已读 |
 | GET | `/api/messages/stats` | 获取消息统计数据 |
 | POST | `/api/demo-data` | 加载演示数据 |
+| GET/POST | `/api/resumes` | 简历列表 / 新建 |
+| PUT/DELETE | `/api/resumes/<id>` | 更新 / 删除简历 |
+| POST | `/api/jobs/search` | 职位搜索（目前 Boss 支持） |
+| GET/POST | `/api/deliveries` | 投递列表 / 批量投递 |
+| GET | `/api/deliveries/stats` | 投递统计 |
+| DELETE | `/api/deliveries/<id>` | 删除投递记录 |
+
+## 🤖 自动刷新消息
+
+登录成功后，后台每 3 分钟自动拉取一次所有已登录平台的消息（同内容按哈希去重，不会重复入库）。可用环境变量调整：
+
+```bash
+MSG_REFRESH_MINUTES=5 python app.py
+```
+
+前端每 30 秒同步一次未读/投递状态，有新消息时会自动高亮并刷新当前列表。
+
+## 📨 简历投递
+
+- 在「简历管理」新建一份简历，填好 `打招呼语`（建议 80 字左右），勾选设为默认
+- 切到「找工作」，选择平台和关键词搜索
+- 勾选感兴趣的职位，点击 `批量投递` — 系统会自动：
+  1. 使用已登录的持久化浏览器打开职位页
+  2. 点击 `立即沟通` 并发送你的打招呼语
+  3. 将结果写入 `投递记录`（待发送 → 发送中 → 已发送 / 失败）
+
+目前 Boss 直聘已实现自动投递，其他平台返回「暂不支持」。
