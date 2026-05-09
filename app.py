@@ -2,6 +2,9 @@ import os
 import asyncio
 import threading
 import base64
+import json
+import ast
+import time
 from datetime import datetime
 from functools import wraps
 
@@ -27,6 +30,35 @@ cipher = Cipher(Config.ENCRYPTION_KEY)
 
 # Background scheduler for periodic message checking
 scheduler = BackgroundScheduler()
+
+
+def _encode_cookies(cookies) -> str:
+    """Serialize cookies to JSON before encryption."""
+    try:
+        return json.dumps(cookies, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return json.dumps([])
+
+
+def _decode_cookies(encrypted: str):
+    """Decrypt and parse cookie blob. Falls back to ast.literal_eval for legacy rows."""
+    if not encrypted:
+        return []
+    try:
+        raw = cipher.decrypt(encrypted)
+    except Exception:
+        return []
+    # New format: JSON.
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        pass
+    # Legacy format: repr(list[dict]). Use ast.literal_eval — never eval.
+    try:
+        data = ast.literal_eval(raw)
+        return data if isinstance(data, (list, tuple)) else []
+    except (ValueError, SyntaxError, TypeError):
+        return []
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -201,7 +233,7 @@ def do_platform_login(user_id: int, platform: str):
                     cred.last_login = datetime.utcnow()
                     if result.get('cookies'):
                         cred.cookie_data = cipher.encrypt(
-                            str(result['cookies'])
+                            _encode_cookies(result['cookies'])
                         )
                     db.session.commit()
                 
@@ -293,7 +325,7 @@ def do_manual_login(user_id: int, platform: str):
                 page = await scraper._context.new_page()
                 result = await scraper.open_login_page(page)
                 
-                # Store session for polling
+                # Store session for polling and confirm
                 if user_id not in _manual_login_sessions:
                     _manual_login_sessions[user_id] = {}
                 _manual_login_sessions[user_id][platform] = {
@@ -301,51 +333,90 @@ def do_manual_login(user_id: int, platform: str):
                     'scraper': scraper,
                     'open_result': result,
                     'login_success': False,
-                    'login_timeout': False
+                    'login_timeout': False,
+                    'confirm_requested': False,
+                    'confirm_result': None,  # None | 'pending' | 'ok' | 'fail'
+                    'done': False
                 }
                 
                 if not result.get('success'):
                     await scraper.stop_browser()
                     return result
                 
-                # Poll for login status for up to 180 seconds (3 minutes)
-                # Use lightweight cookie check to avoid disrupting user's manual login
-                for _ in range(90):
+                # Poll for login status for up to 180 seconds.
+                # We watch three signals, none of which disturbs the user's tab:
+                #   1. The user's tab URL leaves the login/passport page
+                #      (strongest signal for SMS/QR/CAPTCHA login)
+                #   2. Platform auth cookies are issued
+                #   3. The user clicks "I've completed login" → full probe on a
+                #      NEW page (never on the user's active tab)
+                for i in range(90):
                     await asyncio.sleep(2)
+
+                    # Bail out if user closed the browser.
                     try:
-                        is_logged_in = await scraper.check_login_by_cookies()
+                        if page.is_closed():
+                            break
                     except Exception:
-                        is_logged_in = False
+                        break
+
+                    session = _manual_login_sessions.get(user_id, {}).get(platform, {})
+
+                    # (1) URL-based detection on the user's tab (read-only).
+                    url_ok = False
+                    try:
+                        current_url = page.url
+                        if current_url and not scraper.is_login_url(current_url):
+                            # They navigated away from the login page on their own.
+                            url_ok = True
+                    except Exception:
+                        pass
+
+                    # (2) Cookie-based detection.
+                    try:
+                        cookie_ok = await scraper.check_login_by_cookies()
+                    except Exception:
+                        cookie_ok = False
+
+                    is_logged_in = url_ok or cookie_ok
+
+                    # (3) Explicit user confirmation — probe on a fresh page.
+                    if not is_logged_in and session.get('confirm_requested'):
+                        _manual_login_sessions[user_id][platform]['confirm_result'] = 'pending'
+                        probe = None
+                        try:
+                            probe = await scraper._context.new_page()
+                            is_logged_in = await scraper.check_login_status(probe)
+                        except Exception:
+                            is_logged_in = False
+                        finally:
+                            if probe is not None:
+                                try:
+                                    await probe.close()
+                                except Exception:
+                                    pass
+                        if not is_logged_in:
+                            # Reset flag so user can try again later.
+                            _manual_login_sessions[user_id][platform]['confirm_requested'] = False
+                            _manual_login_sessions[user_id][platform]['confirm_result'] = 'fail'
+                        else:
+                            _manual_login_sessions[user_id][platform]['confirm_result'] = 'ok'
                     
                     if is_logged_in:
-                        # Save to DB
-                        cred = PlatformCredential.query.filter_by(
-                            user_id=user_id, platform=platform
-                        ).first()
-                        if not cred:
-                            cred = PlatformCredential(
-                                user_id=user_id,
-                                platform=platform,
-                                username=cipher.encrypt('manual_login'),
-                                password=cipher.encrypt('manual_login')
-                            )
-                            db.session.add(cred)
-                        
-                        cred.is_logged_in = True
-                        cred.last_login = datetime.utcnow()
-                        db.session.commit()
-                        
-                        # Mark success
-                        if user_id in _manual_login_sessions and platform in _manual_login_sessions[user_id]:
-                            _manual_login_sessions[user_id][platform]['login_success'] = True
-                        
-                        # Wait a bit then close browser (profile already saved)
+                        _save_login(user_id, platform)
+                        _manual_login_sessions[user_id][platform]['login_success'] = True
+                        _manual_login_sessions[user_id][platform]['done'] = True
+                        # Give the browser a moment to persist cookies to disk
+                        # before we close the context.
                         await asyncio.sleep(3)
-                        await scraper.stop_browser()
+                        try:
+                            await scraper.stop_browser()
+                        except Exception:
+                            pass
                         if user_id in _manual_login_sessions and platform in _manual_login_sessions[user_id]:
                             del _manual_login_sessions[user_id][platform]
                         return {'success': True, 'message': '登录成功'}
-                
+
                 # Timeout
                 if user_id in _manual_login_sessions and platform in _manual_login_sessions[user_id]:
                     _manual_login_sessions[user_id][platform]['login_timeout'] = True
@@ -366,44 +437,66 @@ def do_manual_login(user_id: int, platform: str):
         return run_async_in_thread(_login())
 
 
-def do_manual_login_confirm(user_id: int, platform: str):
-    """User confirms they have logged in; check the persistent profile."""
+def _save_login(user_id: int, platform: str):
+    """Save login status to DB."""
     with app.app_context():
-        scraper = get_scraper(platform)
-        
-        async def _check():
-            # Use persistent context to access saved session
-            await scraper.start_browser(headless=True, persistent=True)
-            try:
-                page = await scraper._context.new_page()
-                await page.goto(Config.PLATFORMS[platform]['url'], wait_until='domcontentloaded', timeout=30000)
-                await asyncio.sleep(3)
-                
-                is_logged_in = await scraper.check_login_status(page)
-                
-                if is_logged_in:
-                    cred = PlatformCredential.query.filter_by(
-                        user_id=user_id, platform=platform
-                    ).first()
-                    if not cred:
-                        cred = PlatformCredential(
-                            user_id=user_id,
-                            platform=platform,
-                            username=cipher.encrypt('manual_login'),
-                            password=cipher.encrypt('manual_login')
-                        )
-                        db.session.add(cred)
-                    
-                    cred.is_logged_in = True
-                    cred.last_login = datetime.utcnow()
-                    db.session.commit()
-                    return {'success': True, 'message': '登录状态已确认'}
-                else:
-                    return {'success': False, 'message': '未检测到登录状态，请先在浏览器中完成登录'}
-            finally:
-                await scraper.stop_browser()
-        
-        return run_async_in_thread(_check())
+        cred = PlatformCredential.query.filter_by(
+            user_id=user_id, platform=platform
+        ).first()
+        if not cred:
+            cred = PlatformCredential(
+                user_id=user_id,
+                platform=platform,
+                username=cipher.encrypt('manual_login'),
+                password=cipher.encrypt('manual_login')
+            )
+            db.session.add(cred)
+        cred.is_logged_in = True
+        cred.last_login = datetime.utcnow()
+        db.session.commit()
+
+
+def do_manual_login_confirm(user_id: int, platform: str):
+    """
+    User clicked 'I've completed login'.
+    Non-blocking: just signals the polling loop (or spawns a background probe
+    if no session). The frontend keeps polling /status for the real result.
+    """
+    session = _manual_login_sessions.get(user_id, {}).get(platform)
+    if session and not session.get('done'):
+        # Nudge the polling loop to do a full page-based check on its next tick.
+        session['confirm_requested'] = True
+        session['confirm_result'] = 'pending'
+        return {'success': True, 'message': '正在检测登录状态，请稍候...', 'async': True}
+
+    # No active session — spin up a one-shot background probe. The frontend
+    # polls /status which falls back to credential.is_logged_in for the result.
+    def _background_probe():
+        with app.app_context():
+            scraper = get_scraper(platform)
+
+            async def _check():
+                # Open with persistent profile so we reuse the saved cookies.
+                # Must be headless=False — Boss/Zhilian/Liepin flag headless and
+                # redirect to login, which would falsely report "not logged in".
+                await scraper.start_browser(headless=False, persistent=True)
+                try:
+                    if await scraper.check_login_by_cookies():
+                        _save_login(user_id, platform)
+                        return
+                    probe = await scraper._context.new_page()
+                    if await scraper.check_login_status(probe):
+                        _save_login(user_id, platform)
+                finally:
+                    try:
+                        await scraper.stop_browser()
+                    except Exception:
+                        pass
+
+            run_async_in_thread(_check())
+
+    threading.Thread(target=_background_probe, daemon=True).start()
+    return {'success': True, 'message': '正在后台检测登录状态，请稍候...', 'async': True}
 
 
 @app.route('/api/manual-login/<platform>', methods=['POST'])
@@ -418,9 +511,8 @@ def manual_login_start(platform):
         args=(current_user.id, platform)
     )
     thread.start()
-    
+
     # Wait for browser to open
-    import time
     time.sleep(5)
     
     session = _manual_login_sessions.get(current_user.id, {}).get(platform)
@@ -450,35 +542,54 @@ def manual_login_status(platform):
     is_logged_in = cred.is_logged_in if cred else False
     session_active = platform in _manual_login_sessions.get(current_user.id, {})
     session_data = _manual_login_sessions.get(current_user.id, {}).get(platform, {})
-    
+
+    confirm_result = session_data.get('confirm_result')
+    confirm_pending = confirm_result == 'pending'
+    confirm_failed = confirm_result == 'fail'
+
+    if is_logged_in:
+        msg = '登录成功'
+    elif confirm_pending:
+        msg = '正在检测登录状态...'
+    elif confirm_failed:
+        msg = '未检测到登录状态，请确认已在浏览器中完成登录'
+    else:
+        msg = '请在浏览器中完成操作...'
+
     return jsonify({
         'is_logged_in': is_logged_in,
         'session_active': session_active,
         'login_success': session_data.get('login_success', False),
         'login_timeout': session_data.get('login_timeout', False),
-        'message': '登录成功' if is_logged_in else '请在浏览器中完成操作...'
+        'confirm_result': confirm_result,
+        'message': msg
     })
 
 
 @app.route('/api/manual-login/<platform>/confirm', methods=['POST'])
 @login_required
 def manual_login_confirm(platform):
-    """User confirms they've logged in; verify via persistent profile."""
+    """
+    User confirms they've logged in. Returns immediately; the real check
+    runs in the existing manual-login polling loop (or in a one-shot
+    background thread if no session is active). The client continues to
+    poll /api/manual-login/<platform>/status for the outcome.
+    """
     if platform not in Config.PLATFORMS:
         return jsonify({'success': False, 'message': '未知平台'}), 400
-    
+
     result = do_manual_login_confirm(current_user.id, platform)
-    
-    if result.get('success'):
-        return jsonify({'success': True, 'message': result.get('message', '登录状态已确认')})
-    else:
-        return jsonify({'success': False, 'message': result.get('message', '未检测到登录状态')})
+    return jsonify({
+        'success': True,
+        'async': True,
+        'message': result.get('message', '正在检测登录状态...')
+    })
 
 
 # ─── API: Messages ───────────────────────────────────────────────────────────
 
 def fetch_platform_messages(user_id: int, platform: str):
-    """Fetch messages from a specific platform."""
+    """Fetch messages from a specific platform using persistent browser profile."""
     with app.app_context():
         cred = PlatformCredential.query.filter_by(
             user_id=user_id, platform=platform
@@ -490,19 +601,50 @@ def fetch_platform_messages(user_id: int, platform: str):
         scraper = get_scraper(platform)
         
         async def _fetch():
-            await scraper.start_browser(headless=True)
+            # Use non-headless + persistent context to reuse the saved login
+            # session. Boss直聘 / 智联 / 猎聘 actively detect headless browsers
+            # and redirect to login, which would wipe out a perfectly valid
+            # session and incorrectly flip is_logged_in to False.
+            await scraper.start_browser(headless=False, persistent=True)
             try:
-                if cred.cookie_data:
-                    cookies = eval(cipher.decrypt(cred.cookie_data))
-                    await scraper.load_cookies(cookies)
-                
+                # Cheap offline check — don't navigate before we need to.
+                cookie_ok = await scraper.check_login_by_cookies()
+
+                if not cookie_ok:
+                    # Fall back to stored cookies if available, but keep a
+                    # conservative stance: don't immediately invalidate the
+                    # credential on transient failures.
+                    if cred.cookie_data:
+                        try:
+                            cookies = _decode_cookies(cred.cookie_data)
+                            if cookies:
+                                await scraper.load_cookies(cookies)
+                                cookie_ok = await scraper.check_login_by_cookies()
+                        except Exception:
+                            pass
+
                 page = await scraper._context.new_page()
-                
-                if not await scraper.check_login_status(page):
-                    cred.is_logged_in = False
-                    db.session.commit()
-                    return []
-                
+
+                # A real UI/URL probe — but only if cookies look missing.
+                if not cookie_ok:
+                    try:
+                        is_logged_in = await scraper.check_login_status(page)
+                    except Exception:
+                        is_logged_in = False
+
+                    if not is_logged_in:
+                        # Only flag the credential as logged-out if we also
+                        # have zero auth cookies; that avoids flapping on
+                        # temporary network/UI hiccups.
+                        try:
+                            cookies_now = await scraper.get_cookies()
+                        except Exception:
+                            cookies_now = []
+                        if not cookies_now:
+                            cred.is_logged_in = False
+                            db.session.commit()
+                        return []
+
                 return await scraper.fetch_messages(page)
             finally:
                 await scraper.stop_browser()

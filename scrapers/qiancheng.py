@@ -12,6 +12,11 @@ class QianchengScraper(BaseScraper):
     base_url = 'https://www.51job.com'
     login_url = 'https://login.51job.com/login.php'
     message_url = 'https://my.51job.com/myspace/corp_msg.php'
+
+    LOGIN_COOKIE_NAMES = {
+        '51job_login', 'guide_51job', 'usercookie', 'tgc', 'ssxmod_itna',
+    }
+    LOGIN_COOKIE_DOMAINS = {'51job'}
     
     async def login(self, username: str, password: str, page: Page) -> Dict:
         try:
@@ -44,27 +49,17 @@ class QianchengScraper(BaseScraper):
     
     async def check_login_status(self, page: Page) -> bool:
         try:
-            cookies = await self.get_cookies()
-            cookie_names = {c['name'] for c in cookies}
-            if any(name in cookie_names for name in ['51job_login', 'guide_51job', 'usercookie', 'tgc']):
+            if await self.check_login_by_cookies():
                 return True
             await page.goto(self.base_url, wait_until='domcontentloaded', timeout=15000)
             await asyncio.sleep(2)
-            if 'login' in page.url:
+            if self.is_login_url(page.url):
                 return False
             user_el = page.locator('[class*="uname"], [class*="user-info"], .topbar .name')
             return await user_el.count() > 0
         except Exception:
             return False
 
-    async def check_login_by_cookies(self) -> bool:
-        try:
-            cookies = await self.get_cookies()
-            cookie_names = {c['name'] for c in cookies}
-            return any(name in cookie_names for name in ['51job_login', 'guide_51job', 'usercookie', 'tgc', 'token'])
-        except Exception:
-            return False
-    
     async def fetch_messages(self, page: Page) -> List[Dict]:
         messages = []
         try:

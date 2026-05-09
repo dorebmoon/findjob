@@ -23,9 +23,10 @@ class PlatformCredential(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     platform = db.Column(db.String(50), nullable=False)  # boss, zhilian, etc.
-    username = db.Column(db.String(200), nullable=False)  # encrypted
-    password = db.Column(db.String(500), nullable=False)  # encrypted
-    cookie_data = db.Column(db.Text, nullable=True)  # encrypted, stored after login
+    # Fernet ciphertext has no fixed upper bound; use Text to avoid truncation.
+    username = db.Column(db.Text, nullable=False)  # encrypted
+    password = db.Column(db.Text, nullable=False)  # encrypted
+    cookie_data = db.Column(db.Text, nullable=True)  # encrypted JSON
     is_logged_in = db.Column(db.Boolean, default=False)
     last_login = db.Column(db.DateTime, nullable=True)
     last_check = db.Column(db.DateTime, nullable=True)

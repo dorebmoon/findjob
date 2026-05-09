@@ -1768,6 +1768,19 @@
                     
                     document.getElementById('smsWaitMsg').innerHTML = 
                         '<span style="color:var(--accent-red)">登录超时，请点击「我已完成登录」或重试</span>';
+                } else if (data.confirm_result === 'fail') {
+                    // Explicit confirmation came back negative — surface and
+                    // let the user try again without tearing down the session.
+                    const btn = document.getElementById('confirmLoginBtn');
+                    if (btn && btn.disabled) {
+                        btn.innerHTML = '<i class="ri-check-double-line"></i> 我已完成登录';
+                        btn.disabled = false;
+                    }
+                    const waitMsg = document.getElementById('smsWaitMsg');
+                    if (waitMsg) {
+                        waitMsg.innerHTML =
+                            '<span style="color:var(--accent-red)">未检测到登录状态，请确认已在浏览器中完成登录后重试</span>';
+                    }
                 }
             } catch (err) {}
         }, 3000);
@@ -1785,44 +1798,34 @@
 
     async function manualLoginConfirm() {
         if (!currentManualPlatform) return;
-        
+
         const btn = document.getElementById('confirmLoginBtn');
         if (btn) {
             btn.innerHTML = '<span class="spinner"></span> 检测中...';
             btn.disabled = true;
         }
-        
+
+        // Fire-and-forget: the backend kicks off the probe asynchronously.
+        // The polling loop in startManualPolling() picks up the result via
+        // /status (checks is_logged_in / login_success / confirm_result).
         try {
             const resp = await fetch(`/api/manual-login/${currentManualPlatform}/confirm`, { method: 'POST' });
-            const data = await resp.json();
-            
-            if (data.success) {
-                // Success!
-                if (manualPollInterval) {
-                    clearInterval(manualPollInterval);
-                    manualPollInterval = null;
-                }
-                
-                document.getElementById('smsPhase2').style.display = 'none';
-                document.getElementById('smsStep2').className = 'sms-step';
-                document.getElementById('smsStep3').className = 'sms-step active';
-                
-                const statusEl = document.getElementById('smsStatus');
-                statusEl.style.display = 'flex';
-                statusEl.className = 'sms-status success';
-                statusEl.innerHTML = '<i class="ri-check-line"></i><span>✅ 登录状态已确认！</span>';
-                
-                showToast(`${currentManualName} 登录成功！`, 'success');
-                loadPlatformStatus();
-                
-                setTimeout(() => closeSmsModal(), 2000);
-            } else {
-                showToast(data.message, 'error');
-                if (btn) {
+            const data = await resp.json().catch(() => ({}));
+
+            // Ensure status polling is running so we surface the outcome.
+            if (!manualPollInterval) startManualPolling();
+
+            // Fallback timer — if nothing changes after 25s, re-enable the button.
+            const platformAtClick = currentManualPlatform;
+            setTimeout(() => {
+                if (platformAtClick !== currentManualPlatform) return;
+                if (btn && btn.disabled) {
                     btn.innerHTML = '<i class="ri-check-double-line"></i> 我已完成登录';
                     btn.disabled = false;
                 }
-            }
+            }, 25000);
+
+            if (data && data.message) showToast(data.message, 'info');
         } catch (err) {
             showToast('网络错误，请重试', 'error');
             if (btn) {

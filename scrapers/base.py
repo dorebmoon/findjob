@@ -109,23 +109,73 @@ class BaseScraper(ABC):
         except Exception as e:
             return {'success': False, 'message': f'打开登录页失败: {str(e)}'}
 
+    # Cookie names that subclasses can override / extend to indicate a signed-in session.
+    LOGIN_COOKIE_NAMES: set = set()
+    # Optional: restrict auth-cookie matching to these domain substrings for accuracy.
+    # e.g. {'zhipin'} for Boss, {'zhaopin'} for 智联. If empty, all cookies are considered.
+    LOGIN_COOKIE_DOMAINS: set = set()
+
+    def _cookie_matches_domain(self, cookie: Dict) -> bool:
+        if not self.LOGIN_COOKIE_DOMAINS:
+            return True
+        domain = (cookie.get('domain') or '').lower()
+        return any(d in domain for d in self.LOGIN_COOKIE_DOMAINS)
+
     async def check_login_by_cookies(self) -> bool:
         """
         Lightweight login status check using ONLY cookies (no navigation).
-        This is safe to use during polling without disrupting the user's login process.
-        Subclasses should override this with platform-specific cookie checks.
+        Safe to use during polling without disrupting the user's login process.
+
+        Detection strategy (in order):
+          1. Exact match on subclass-declared LOGIN_COOKIE_NAMES
+          2. Auth-keyword heuristic (token/session/passport/ticket/sso)
+             on cookies whose domain passes LOGIN_COOKIE_DOMAINS
+          3. Skip known pre-login tracking cookies (analytics, A/B)
+        Subclasses normally only need to set LOGIN_COOKIE_NAMES (and optionally
+        LOGIN_COOKIE_DOMAINS) — no need to override this method.
         """
         try:
             cookies = await self.get_cookies()
-            cookie_names = {c['name'] for c in cookies}
-            # Generic check: look for common auth-related cookie patterns
-            auth_keywords = ['token', 'session', 'uid', 'user', 'login', 'auth', 'sid', 'passport']
-            for name in cookie_names:
-                name_lower = name.lower()
-                for keyword in auth_keywords:
-                    if keyword in name_lower:
-                        return True
+            scoped = [c for c in cookies if self._cookie_matches_domain(c)]
+            cookie_names = {c['name'] for c in scoped}
+            # 1. Exact match on known auth cookies (fast path).
+            if self.LOGIN_COOKIE_NAMES and cookie_names & self.LOGIN_COOKIE_NAMES:
+                return True
+            # 2. Heuristic fallback.
+            tracking_prefixes = (
+                'hm_lvt_', 'hm_lpvt_', 'hmaccount', 'ab_', 'bid', '_ga', '_gid',
+                'hm_', '__a', '__c', '__g', '__l', 'wzws_', 'acw_',
+            )
+            auth_keywords = ('token', 'session', 'passport', 'ticket', 'sso')
+            for c in scoped:
+                n = c['name'].lower()
+                if any(n.startswith(p) for p in tracking_prefixes):
+                    continue
+                if any(k in n for k in auth_keywords) and c.get('value'):
+                    return True
             return False
+        except Exception:
+            return False
+
+    def is_login_url(self, url: str) -> bool:
+        """Heuristic: return True if the given URL looks like a login/auth page."""
+        if not url:
+            return True
+        u = url.lower()
+        markers = ('login', 'passport', 'signin', 'sign-in', '/user/?ka=header-login', 'authorize')
+        return any(m in u for m in markers)
+
+    async def check_login_by_url(self, page: Page) -> bool:
+        """
+        Verify login by visiting a page that requires auth (messages page if available,
+        else base_url) using a fresh page context. Returns True if the final URL is
+        NOT a login/auth page.
+        """
+        target = self.message_url or self.base_url
+        try:
+            await page.goto(target, wait_until='domcontentloaded', timeout=20000)
+            await asyncio.sleep(2)
+            return not self.is_login_url(page.url)
         except Exception:
             return False
 
